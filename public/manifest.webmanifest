@@ -1,0 +1,13 @@
+{
+  "name": "חמ\"ל ספורט",
+  "short_name": "חמ\"ל",
+  "lang": "he",
+  "dir": "rtl",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#e9f2ea",
+  "theme_color": "#e9f2ea",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
