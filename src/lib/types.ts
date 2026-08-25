@@ -13,8 +13,11 @@ export interface Competition {
   name: string;
   short: string;
   sport: Sport;
-  /** api-football league id, or balldontlie for the NBA */
-  providerId?: number;
+  /**
+   * מזהי הליגה אצל הספק. מערך, כי "מפעלים אירופיים" מאגד יותר מתחרות
+   * אחת. הרץ `npm run leagues` כדי לשלוף את המזהים האמיתיים מהחשבון שלך.
+   */
+  providerIds?: number[];
   accent: string;
 }
 

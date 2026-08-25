@@ -1,5 +1,5 @@
 import type { CompetitionId, Match, MatchEvent, MatchStatus } from '../../lib/types';
-import { COMPETITIONS } from '../competitions';
+import { COMPETITIONS, competitionForProviderId } from '../competitions';
 
 /**
  * אדפטר ל-API-Football‏ (api-sports.io).
@@ -30,11 +30,6 @@ function mapStatus(short: string): MatchStatus {
   if (DONE_CODES.has(short)) return 'finished';
   if (short === 'PST' || short === 'CANC' || short === 'ABD') return 'postponed';
   return 'scheduled';
-}
-
-function leagueToCompetition(leagueId: number): CompetitionId | null {
-  const hit = COMPETITIONS.find((c) => c.providerId === leagueId);
-  return hit ? hit.id : null;
 }
 
 function shortName(name: string): string {
@@ -93,30 +88,40 @@ async function call(path: string): Promise<ApiFixture[]> {
   throw new Error('api-football: unexpected payload');
 }
 
+/** מזהי הליגות אצל הספק עבור התחרויות שנבחרו. */
+function providerIdsFor(competitions: CompetitionId[]): number[] {
+  return COMPETITIONS.filter((c) => c.sport === 'football' && competitions.includes(c.id))
+    .flatMap((c) => c.providerIds ?? []);
+}
+
 /** כל המשחקים החיים בליגות שבתצורה. */
 export async function fetchLiveFootball(competitions: CompetitionId[]): Promise<Match[]> {
-  const ids = COMPETITIONS.filter((c) => c.sport === 'football' && competitions.includes(c.id) && c.providerId)
-    .map((c) => c.providerId)
-    .join('-');
-  if (!ids) return [];
+  const ids = providerIdsFor(competitions);
+  if (!ids.length) return [];
 
-  const rows = await call(`/fixtures?live=${ids}`);
+  const rows = await call(`/fixtures?live=${ids.join('-')}`);
   return rows.flatMap((fx) => {
-    const comp = leagueToCompetition(fx.league.id);
+    const comp = competitionForProviderId(fx.league.id);
     return comp ? [mapFixture(fx, comp)] : [];
   });
 }
 
 /** לוח משחקים ליום מסוים (YYYY-MM-DD), כולל משחקים שטרם החלו והסתיימו. */
 export async function fetchFootballByDate(date: string, competitions: CompetitionId[]): Promise<Match[]> {
-  const leagues = COMPETITIONS.filter((c) => c.sport === 'football' && competitions.includes(c.id) && c.providerId);
+  const day = new Date(date);
+  // עונת כדורגל אירופית נפתחת באוגוסט ונחתמת במאי, ולכן חודשים ינואר-יוני
+  // שייכים לעונה שנפתחה בשנה הקודמת.
+  const season = day.getMonth() >= 6 ? day.getFullYear() : day.getFullYear() - 1;
+
   const batches = await Promise.all(
-    leagues.map(async (league) => {
-      const season = new Date(date).getMonth() >= 6 ? new Date(date).getFullYear() : new Date(date).getFullYear() - 1;
+    providerIdsFor(competitions).map(async (leagueId) => {
+      const comp = competitionForProviderId(leagueId);
+      if (!comp) return [];
       try {
-        const rows = await call(`/fixtures?date=${date}&league=${league.providerId}&season=${season}`);
-        return rows.map((fx) => mapFixture(fx, league.id));
+        const rows = await call(`/fixtures?date=${date}&league=${leagueId}&season=${season}`);
+        return rows.map((fx) => mapFixture(fx, comp));
       } catch {
+        // ליגה בודדת שנכשלת לא מפילה את שאר הלוח
         return [];
       }
     }),
