@@ -1,10 +1,11 @@
-import { HomeIcon, LegionIcon, LiveIcon, RadarIcon } from './Icons';
+import { HomeIcon, LegionIcon, LiveIcon, RadarIcon, TableIcon } from './Icons';
 
-export type TabId = 'home' | 'live' | 'legion' | 'radar';
+export type TabId = 'home' | 'live' | 'table' | 'legion' | 'radar';
 
 const TABS: { id: TabId; label: string; Icon: (p: { className?: string }) => JSX.Element }[] = [
   { id: 'home', label: 'בית', Icon: HomeIcon },
   { id: 'live', label: 'לייב', Icon: LiveIcon },
+  { id: 'table', label: 'טבלה', Icon: TableIcon },
   { id: 'legion', label: 'לגיונרים', Icon: LegionIcon },
   { id: 'radar', label: 'רדאר', Icon: RadarIcon },
 ];

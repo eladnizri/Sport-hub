@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [claude/hamaal-sport-app-2e2ygl, main]
+    branches: [claude/sports-app-beyond-scores-zj7d4v, main]
 
 permissions:
   contents: read

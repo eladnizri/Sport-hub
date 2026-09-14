@@ -11,7 +11,16 @@ import { CloseIcon } from '../components/Icons';
  * שבהם רצים כמה משחקים במקביל ואין זמן לנווט בין מסכים.
  */
 export function Matchday({ prefs, onClose }: { prefs: Prefs; onClose: () => void }) {
-  const feed = useFeed(() => getMatches(prefs.competitions), 20000, [prefs.competitions.join(',')]);
+  const feed = useFeed(
+    () =>
+      getMatches({
+        competitions: prefs.competitions,
+        followedTeams: prefs.followedTeams,
+        allowLive: prefs.liveForMyMatches,
+      }),
+    20000,
+    [prefs.competitions.join(','), prefs.liveForMyMatches],
+  );
   const matches = feed.data?.items ?? [];
 
   const { live, next } = useMemo(

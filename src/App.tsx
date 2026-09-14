@@ -4,6 +4,7 @@ import { SettingsSheet } from './components/SettingsSheet';
 import { usePrefs } from './hooks/usePrefs';
 import { Home } from './screens/Home';
 import { Live } from './screens/Live';
+import { Table } from './screens/Table';
 import { Legionnaires } from './screens/Legionnaires';
 import { Radar } from './screens/Radar';
 import { Matchday } from './screens/Matchday';
@@ -20,7 +21,8 @@ export default function App() {
   useEffect(() => {
     if (!prefs.autoMatchday || autoPrompted || matchdayOpen) return;
     let cancelled = false;
-    getMatches(prefs.competitions).then((feed) => {
+    // בדיקה מהקאש בלבד — אין סיבה לשרוף קריאה חיה רק כדי לספור משחקים
+    getMatches({ competitions: prefs.competitions, allowLive: false }).then((feed) => {
       if (cancelled) return;
       const live = feed.items.filter((m) => m.status === 'live' || m.status === 'halftime');
       if (live.length >= 3) {
@@ -43,7 +45,8 @@ export default function App() {
           />
         )}
         {tab === 'live' && <Live prefs={prefs} onOpenMatchday={() => setMatchdayOpen(true)} />}
-        {tab === 'legion' && <Legionnaires prefs={prefs} />}
+        {tab === 'table' && <Table prefs={prefs} />}
+        {tab === 'legion' && <Legionnaires prefs={prefs} onChange={update} />}
         {tab === 'radar' && <Radar prefs={prefs} />}
       </main>
 

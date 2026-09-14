@@ -1,12 +1,13 @@
 import type {
   CompetitionId,
-  Legionnaire,
-  LegionnaireReport,
+  LegionnaireAppearance,
   Match,
   MatchEvent,
+  Standing,
   TransferItem,
 } from '../../lib/types';
-import { LEGIONNAIRES } from '../legionnaires';
+import { accentFor, shortName } from '../competitions';
+import { BASE_LEGIONNAIRES } from '../legionnaires';
 
 /**
  * ספק דמו.
@@ -34,6 +35,11 @@ function rng(seed: string): () => number {
     s ^= s << 5; s >>>= 0;
     return s / 4294967296;
   };
+}
+
+/** מזהה קבוצה יציב לדמו, כדי שהטבלה והמשחקים ידברו באותה שפה. */
+function teamId(name: string): number {
+  return (hash(name) % 90000) + 10000;
 }
 
 function atHour(base: Date, hour: number, minute = 0): Date {
@@ -67,24 +73,33 @@ interface Fixture {
  */
 const FIXTURES: Fixture[] = [
   { id: 'f-live-1', competition: 'premier-league', home: ['Brighton', 'BHA', '#0057b8'], away: ['Aston Villa', 'AVL', '#670e36'], cycle: [120, 0] },
-  { id: 'f-live-2', competition: 'ligat-haal', home: ['הפועל ירושלים', 'הפ״י', '#c0492f'], away: ['מכבי נתניה', 'מ״נ', '#4b3f9e'], cycle: [120, 40], israeliInterest: true },
+  { id: 'f-live-2', competition: 'ligat-haal', home: ['Hapoel Jerusalem', 'HJ', '#c0492f'], away: ['Maccabi Netanya', 'MN', '#4b3f9e'], cycle: [120, 40], israeliInterest: true },
   { id: 'f-live-3', competition: 'champions-league', home: ['Villarreal', 'VIL', '#f5c518'], away: ['Inter', 'INT', '#0b1f6b'], cycle: [120, 80], israeliInterest: true },
   { id: 'f-live-4', competition: 'nba', home: ['Portland', 'POR', '#c0492f'], away: ['Denver', 'DEN', '#0e2240'], cycle: [170, 20], israeliInterest: true },
-  { id: 'f-ha-1', competition: 'ligat-haal', home: ['מכבי תל אביב', 'מ״ת', '#f5c518'], away: ['הפועל באר שבע', 'הב״ש', '#c0392b'], hour: 20, minute: 15, israeliInterest: true },
-  { id: 'f-ha-2', competition: 'ligat-haal', home: ['מכבי חיפה', 'מ״ח', '#2f7a5a'], away: ['בית"ר ירושלים', 'ביתר', '#e2b13c'], hour: 18, israeliInterest: true },
-  { id: 'f-ha-3', competition: 'ligat-haal', home: ['הפועל תל אביב', 'הת״א', '#c0492f'], away: ['מכבי נתניה', 'מ״נ', '#4b3f9e'], hour: 21, israeliInterest: true },
+  { id: 'f-ha-1', competition: 'ligat-haal', home: ['Maccabi Tel Aviv', 'MTA', '#f5c518'], away: ['Hapoel Beer Sheva', 'HBS', '#c0392b'], hour: 20, minute: 15, israeliInterest: true },
+  { id: 'f-ha-2', competition: 'ligat-haal', home: ['Maccabi Haifa', 'MH', '#2f7a5a'], away: ['Beitar Jerusalem', 'BJ', '#e2b13c'], hour: 18, israeliInterest: true },
+  { id: 'f-ha-3', competition: 'ligat-haal', home: ['Hapoel Tel Aviv', 'HTA', '#c0492f'], away: ['Maccabi Netanya', 'MN', '#4b3f9e'], hour: 21, israeliInterest: true },
   { id: 'f-pl-1', competition: 'premier-league', home: ['Liverpool', 'LIV', '#c8102e'], away: ['Arsenal', 'ARS', '#ef0107'], hour: 19, minute: 30 },
-  { id: 'f-pl-2', competition: 'premier-league', home: ['Man City', 'MCI', '#6cabdd'], away: ['Chelsea', 'CHE', '#034694'], hour: 17 },
+  { id: 'f-pl-2', competition: 'premier-league', home: ['Manchester City', 'MCI', '#6cabdd'], away: ['Chelsea', 'CHE', '#034694'], hour: 17 },
   { id: 'f-pl-3', competition: 'premier-league', home: ['Tottenham', 'TOT', '#132257'], away: ['Newcastle', 'NEW', '#241f20'], hour: 14, minute: 30 },
-  { id: 'f-ucl-1', competition: 'champions-league', home: ['Real Madrid', 'RMA', '#1f4f8a'], away: ['Bayern', 'BAY', '#dc052d'], hour: 22 },
-  { id: 'f-ucl-2', competition: 'champions-league', home: ['Benfica', 'BEN', '#e30613'], away: ['Dortmund', 'DOR', '#fde100'], hour: 22 },
-  { id: 'f-uec-1', competition: 'europa-conference', home: ['Slavia Prague', 'SLA', '#8b1e2d'], away: ['מכבי תל אביב', 'מ״ת', '#f5c518'], hour: 21, minute: 45, israeliInterest: true },
-  { id: 'f-uec-2', competition: 'europa-conference', home: ['AEK Athens', 'AEK', '#f2c200'], away: ['Rangers', 'RAN', '#1c458f'], hour: 19, minute: 45, israeliInterest: true },
+  { id: 'f-ucl-1', competition: 'champions-league', home: ['Real Madrid', 'RMA', '#1f4f8a'], away: ['Bayern Munich', 'BAY', '#dc052d'], hour: 22 },
+  { id: 'f-ucl-2', competition: 'champions-league', home: ['Benfica', 'BEN', '#e30613'], away: ['Borussia Dortmund', 'DOR', '#fde100'], hour: 22 },
+  { id: 'f-uec-1', competition: 'conference-league', home: ['Slavia Praha', 'SLA', '#8b1e2d'], away: ['Maccabi Tel Aviv', 'MTA', '#f5c518'], hour: 21, minute: 45, israeliInterest: true },
+  { id: 'f-uec-2', competition: 'conference-league', home: ['AEK Athens', 'AEK', '#f2c200'], away: ['Rangers', 'RAN', '#1c458f'], hour: 19, minute: 45, israeliInterest: true },
   { id: 'f-nba-1', competition: 'nba', home: ['New York', 'NYK', '#f58426'], away: ['Philadelphia', 'PHI', '#006bb6'], hour: 4, minute: 30 },
   { id: 'f-nba-2', competition: 'nba', home: ['Boston', 'BOS', '#007a33'], away: ['Miami', 'MIA', '#98002e'], hour: 2, minute: 30 },
   { id: 'f-nba-3', competition: 'nba', home: ['LA Lakers', 'LAL', '#552583'], away: ['Golden State', 'GSW', '#1d428a'], hour: 5 },
-  { id: 'f-el-1', competition: 'euroleague', home: ['מכבי תל אביב', 'מ״ת', '#f5c518'], away: ['Panathinaikos', 'PAO', '#0a5c36'], hour: 20, minute: 5, israeliInterest: true },
 ];
+
+const DEMO_SCORERS = [
+  'ערן זהבי', 'דור פרץ', 'מנור סולומון', 'אוסקר גלוך', 'מוחמד אבו פאני',
+  'שון גולדברג', 'דולב חזיזה', 'עומר אצילי', 'ליאל אבדה', 'סתיו למקין',
+];
+
+/** מבקיע יציב לכל שער, כדי שהסיכום לא ישנה שמות בכל רענון. */
+function scorerFor(seed: string, minute: number): string {
+  return DEMO_SCORERS[hash(`${seed}:${minute}`) % DEMO_SCORERS.length];
+}
 
 const FOOTBALL_LENGTH = 96; // כולל תוספת זמן
 const BASKET_LENGTH = 130; // 48 דקות משחק שנמתחות על ~2:10 שעון אמיתי
@@ -123,8 +138,10 @@ function buildFootball(fx: Fixture, now: Date, kickoff: Date): Match {
   const awayScore = status === 'scheduled' ? null : awayGoals.filter((m) => m <= visible).length;
 
   const events: MatchEvent[] = [
-    ...homeGoals.filter((m) => m <= visible).map<MatchEvent>((m) => ({ minute: m, type: 'goal', team: 'home', text: `שער ל${fx.home[0]}` })),
-    ...awayGoals.filter((m) => m <= visible).map<MatchEvent>((m) => ({ minute: m, type: 'goal', team: 'away', text: `שער ל${fx.away[0]}` })),
+    // הפורמט מחקה את הספק: "סוג השער · שם השחקן", כי מנוע הסיכומים
+    // מחלץ את שם המבקיע מהחלק שאחרי המפריד.
+    ...homeGoals.filter((m) => m <= visible).map<MatchEvent>((m) => ({ minute: m, type: 'goal', team: 'home', text: `שער · ${scorerFor(fx.id + ':h', m)}` })),
+    ...awayGoals.filter((m) => m <= visible).map<MatchEvent>((m) => ({ minute: m, type: 'goal', team: 'away', text: `שער · ${scorerFor(fx.id + ':a', m)}` })),
   ].sort((a, b) => b.minute - a.minute);
 
   const possession = 38 + Math.floor(r() * 24);
@@ -135,8 +152,8 @@ function buildFootball(fx: Fixture, now: Date, kickoff: Date): Match {
     status,
     clock,
     kickoff: kickoff.toISOString(),
-    home: { name: fx.home[0], short: fx.home[1], accent: fx.home[2], score: homeScore },
-    away: { name: fx.away[0], short: fx.away[1], accent: fx.away[2], score: awayScore },
+    home: { name: fx.home[0], short: fx.home[1], accent: fx.home[2], score: homeScore, providerId: teamId(fx.home[0]) },
+    away: { name: fx.away[0], short: fx.away[1], accent: fx.away[2], score: awayScore, providerId: teamId(fx.away[0]) },
     israeliInterest: fx.israeliInterest,
     events,
     stats:
@@ -181,8 +198,8 @@ function buildBasket(fx: Fixture, now: Date, tip: Date): Match {
     status,
     clock,
     kickoff: tip.toISOString(),
-    home: { name: fx.home[0], short: fx.home[1], accent: fx.home[2], score: homeScore },
-    away: { name: fx.away[0], short: fx.away[1], accent: fx.away[2], score: awayScore },
+    home: { name: fx.home[0], short: fx.home[1], accent: fx.home[2], score: homeScore, providerId: teamId(fx.home[0]) },
+    away: { name: fx.away[0], short: fx.away[1], accent: fx.away[2], score: awayScore, providerId: teamId(fx.away[0]) },
     israeliInterest: fx.israeliInterest,
     events: [],
     stats:
@@ -207,7 +224,7 @@ function kickoffFor(fx: Fixture, now: Date): Date {
 export function demoMatches(now = new Date()): Match[] {
   return FIXTURES.map((fx) => {
     const kickoff = kickoffFor(fx, now);
-    return fx.competition === 'nba' || fx.competition === 'euroleague'
+    return fx.competition === 'nba'
       ? buildBasket(fx, now, kickoff)
       : buildFootball(fx, now, kickoff);
   }).sort((a, b) => a.kickoff.localeCompare(b.kickoff));
@@ -226,57 +243,159 @@ function sameClub(a: string, b: string): boolean {
   return x === y || x.includes(y) || y.includes(x);
 }
 
-export function demoLegionnaires(now = new Date(), matches = demoMatches(now)): LegionnaireReport[] {
-  return LEGIONNAIRES.map((player: Legionnaire) => {
-    const r = rng(player.id + now.toDateString());
-    const own = matches.find(
-      (m) => sameClub(m.home.name, player.club) || sameClub(m.away.name, player.club),
-    );
-    const kickoff = own ? own.kickoff : atHour(now, 19 + Math.floor(r() * 3)).toISOString();
-    const started = new Date(kickoff).getTime() <= now.getTime();
-    const live = own ? own.status === 'live' || own.status === 'halftime' : false;
-    const finished = own ? own.status === 'finished' : started;
+/**
+ * היסטוריית הופעות סינתטית ללגיונרים.
+ *
+ * מחזירה את אותו מבנה שהקאש האמיתי מחזיק, כך שמסך הלגיונרים ומנוע
+ * התיק (src/lib/dossier.ts) רצים על נתוני דמו ועל נתונים אמיתיים באותו
+ * קוד בדיוק. לכל שחקן נגזרת מגמה יציבה מה-id שלו, כדי שהמסך יראה
+ * עולים ויורדים אמיתיים ולא רעש אקראי.
+ */
+export function demoAppearances(
+  now = new Date(),
+  matches = demoMatches(now),
+): Record<string, LegionnaireAppearance[]> {
+  const out: Record<string, LegionnaireAppearance[]> = {};
 
-    const benched = r() < 0.18;
-    const status: LegionnaireReport['status'] = benched
-      ? started ? 'bench' : 'upcoming'
-      : live ? 'playing'
-      : finished ? 'played'
-      : 'upcoming';
-
+  for (const player of BASE_LEGIONNAIRES) {
+    const r = rng(player.id);
+    // כיוון המגמה נקבע פעם אחת לשחקן: עולה, יציב או יורד
+    const direction = r() < 0.34 ? 1 : r() < 0.6 ? 0 : -1;
     const maxMinutes = player.sport === 'basketball' ? 34 : 90;
-    const share = status === 'upcoming' || status === 'bench' ? 0 : live ? 0.4 + r() * 0.5 : 0.6 + r() * 0.4;
-    const minutes = Math.round(maxMinutes * share);
 
-    const opponent = own
-      ? sameClub(own.home.name, player.club) ? own.away.name : own.home.name
-      : OPPONENTS[Math.floor(r() * OPPONENTS.length)];
+    const rows: LegionnaireAppearance[] = [];
+    for (let back = 0; back < 6; back++) {
+      const date = new Date(now.getTime() - back * 6.5 * 24 * 3600 * 1000);
+      const rr = rng(`${player.id}:${back}`);
 
-    if (player.sport === 'basketball') {
-      const points = minutes ? Math.round(minutes * (0.35 + r() * 0.35)) : 0;
-      return {
-        player,
-        status,
+      // back=0 הוא המשחק האחרון; המגמה נמדדת ממנו אחורה
+      const lean = direction * (2 - Math.min(back, 4)) * 0.12;
+      const share = Math.max(0, Math.min(1, 0.55 + lean + (rr() - 0.5) * 0.3));
+      const minutes = share < 0.12 ? 0 : Math.round(maxMinutes * share);
+      const started = minutes >= maxMinutes * 0.7;
+
+      const goals = minutes > 20 && rr() < 0.26 ? 1 : 0;
+      const assists = minutes > 20 && rr() < 0.2 ? 1 : 0;
+
+      const todays = back === 0
+        ? matches.find((m) => sameClub(m.home.name, player.club) || sameClub(m.away.name, player.club))
+        : undefined;
+      const opponent = todays
+        ? sameClub(todays.home.name, player.club) ? todays.away.name : todays.home.name
+        : OPPONENTS[Math.floor(rr() * OPPONENTS.length)];
+
+      rows.push({
+        fixtureId: todays?.id ?? `demo-${player.id}-${back}`,
+        date: (todays ? new Date(todays.kickoff) : date).toISOString(),
         opponent,
+        away: back % 2 === 1,
+        started,
         minutes,
-        goals: 0,
-        assists: minutes ? Math.round(minutes * 0.09) : 0,
-        rating: null,
-        points,
-        rebounds: minutes ? Math.round(minutes * 0.22) : 0,
-        kickoff,
-      };
+        goals,
+        assists,
+        rating: minutes ? Math.round((6 + goals * 1.1 + assists * 0.7 + rr() * 1.2) * 10) / 10 : null,
+        ...(player.sport === 'basketball'
+          ? {
+              points: minutes ? Math.round(minutes * (0.35 + rr() * 0.35)) : 0,
+              rebounds: minutes ? Math.round(minutes * 0.22) : 0,
+            }
+          : {}),
+      });
     }
 
-    const goals = minutes > 20 && r() < 0.28 ? 1 + (r() < 0.15 ? 1 : 0) : 0;
-    const assists = minutes > 20 && r() < 0.24 ? 1 : 0;
-    const rating = minutes ? Math.round((6 + goals * 1.1 + assists * 0.7 + r() * 1.4) * 10) / 10 : null;
+    out[player.id] = rows;
+  }
 
-    return { player, status, opponent, minutes, goals, assists, rating, kickoff };
-  }).sort((a, b) => {
-    const order = { playing: 0, played: 1, bench: 2, upcoming: 3, out: 4 } as const;
-    return order[a.status] - order[b.status] || b.minutes - a.minutes;
-  });
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
+/* טבלאות דמו                                                          */
+/* ------------------------------------------------------------------ */
+
+const TABLE_TEAMS: Record<string, string[]> = {
+  'ligat-haal': [
+    'Maccabi Tel Aviv', 'Maccabi Haifa', 'Hapoel Beer Sheva', 'Beitar Jerusalem',
+    'Hapoel Tel Aviv', 'Maccabi Netanya', 'Hapoel Jerusalem', 'Bnei Sakhnin',
+    'Hapoel Haifa', 'Ironi Kiryat Shmona', 'Ashdod', 'Maccabi Bnei Raina',
+  ],
+  'premier-league': [
+    'Liverpool', 'Arsenal', 'Manchester City', 'Chelsea', 'Newcastle',
+    'Aston Villa', 'Tottenham', 'Brighton', 'Manchester United', 'West Ham',
+  ],
+  'champions-league': [
+    'Real Madrid', 'Bayern Munich', 'Inter', 'Liverpool', 'Barcelona',
+    'Arsenal', 'Borussia Dortmund', 'Villarreal',
+  ],
+  'europa-league': ['Roma', 'Ajax', 'Porto', 'Rangers', 'Lyon', 'Real Betis'],
+  'conference-league': [
+    'Slavia Praha', 'AEK Athens', 'Maccabi Tel Aviv', 'Fiorentina', 'Celtic', 'PSV',
+  ],
+};
+
+/**
+ * טבלאות דמו יציבות. הנקודות נגזרות מה-id של הקבוצה ולא מהשעון, כדי
+ * שהטבלה לא תקפוץ בכל רענון — ואז המשחקים החיים מוחלים עליה במסך
+ * ומייצרים תנועה אמיתית.
+ */
+export function demoStandings(): Standing[] {
+  const out: Standing[] = [];
+
+  for (const [competition, teams] of Object.entries(TABLE_TEAMS)) {
+    const rows = teams.map((team) => {
+      const r = rng(`table:${competition}:${team}`);
+      const played = competition === 'ligat-haal' || competition === 'premier-league' ? 12 : 5;
+      const won = Math.floor(r() * (played + 1));
+      const drawn = Math.floor(r() * (played - won + 1));
+      const lost = played - won - drawn;
+      const goalsFor = won * 2 + drawn + Math.floor(r() * 5);
+      const goalsAgainst = lost * 2 + drawn + Math.floor(r() * 4);
+      const form = Array.from({ length: 5 }, () => (r() < 0.45 ? 'W' : r() < 0.7 ? 'D' : 'L')).join('');
+
+      return {
+        competition: competition as CompetitionId,
+        rank: 0,
+        teamId: teamId(team),
+        team,
+        short: shortName(team),
+        accent: accentFor(team),
+        played, won, drawn, lost, goalsFor, goalsAgainst,
+        points: won * 3 + drawn,
+        form,
+        group: null,
+        marker: null as string | null,
+      } satisfies Standing;
+    });
+
+    rows.sort(
+      (a, b) =>
+        b.points - a.points ||
+        b.goalsFor - b.goalsAgainst - (a.goalsFor - a.goalsAgainst) ||
+        b.goalsFor - a.goalsFor,
+    );
+    rows.forEach((row, i) => {
+      row.rank = i + 1;
+      row.marker = markerFor(competition as CompetitionId, i + 1, rows.length);
+    });
+    out.push(...rows);
+  }
+
+  return out;
+}
+
+function markerFor(competition: CompetitionId, rank: number, total: number): string | null {
+  if (competition === 'champions-league') {
+    if (rank <= 2) return 'שמינית הגמר';
+    if (rank <= 6) return 'פלייאוף';
+    return null;
+  }
+  if (competition === 'europa-league' || competition === 'conference-league') {
+    return rank <= 2 ? 'העפלה' : rank <= 4 ? 'פלייאוף' : null;
+  }
+  if (rank === 1) return 'אליפות';
+  if (rank <= 3) return 'אירופה';
+  if (rank > total - 2) return 'מאבק הישרדות';
+  return null;
 }
 
 const TRANSFERS: Omit<TransferItem, 'publishedAt'>[] = [
@@ -308,7 +427,7 @@ const TRANSFERS: Omit<TransferItem, 'publishedAt'>[] = [
     id: 't-5', player: 'אנאן ח׳לאילי', sport: 'football', fromClub: 'Slavia Prague', toClub: 'Bologna',
     stage: 'agreed', reliability: 4, source: 'Di Marzio', fee: '€6M + 15%',
     summary: 'הסכמה עקרונית בין המועדונים, נותרו בדיקות רפואיות.',
-    competitions: ['europa-conference'],
+    competitions: ['conference-league'],
   },
   {
     id: 't-6', player: 'ליאל אבדה', sport: 'football', fromClub: 'Charlotte FC', toClub: 'מכבי תל אביב',
@@ -320,13 +439,13 @@ const TRANSFERS: Omit<TransferItem, 'publishedAt'>[] = [
     id: 't-7', player: 'ג׳ורדן מקריי', sport: 'basketball', fromClub: 'NBA G-League', toClub: 'Panathinaikos',
     stage: 'done', reliability: 5, source: 'EuroHoops', fee: 'עד סוף העונה',
     summary: 'החתמה מיידית לקראת סבב המשחקים הכפול ביורוליג.',
-    competitions: ['euroleague'],
+    competitions: ['europa-league'],
   },
   {
     id: 't-8', player: 'דור פרץ', sport: 'football', fromClub: 'AEK Athens', toClub: 'Trabzonspor',
     stage: 'rumor', reliability: 2, source: 'Fanatik', fee: null,
     summary: 'דיווח טורקי על בדיקה מוקדמת. מקורות בסביבת השחקן מכחישים.',
-    competitions: ['europa-conference'],
+    competitions: ['conference-league'],
   },
 ];
 

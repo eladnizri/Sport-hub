@@ -1,15 +1,16 @@
 import { useMemo, useState } from 'react';
-import { getMatches } from '../data';
+import { getTableView } from '../data';
 import { useFeed } from '../hooks/useFeed';
 import type { Prefs } from '../lib/prefs';
 import type { CompetitionId } from '../lib/types';
-import { COMPETITIONS } from '../data/competitions';
+import { BROWSABLE } from '../data/competitions';
+import { buildLiveTable } from '../lib/liveTable';
 import { MatchCard } from '../components/MatchCard';
 import { PageHead } from '../components/PageHead';
 import { SourceNote } from '../components/SourceNote';
 import { GridIcon } from '../components/Icons';
 
-type Filter = 'all' | 'live' | 'today' | CompetitionId;
+type Filter = 'all' | 'live' | 'today' | 'mine' | CompetitionId;
 
 interface Props {
   prefs: Prefs;
@@ -22,20 +23,38 @@ export function Live({ prefs, onOpenMatchday }: Props) {
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
 
   const feed = useFeed(
-    () => getMatches(prefs.competitions),
+    () =>
+      getTableView({
+        competitions: prefs.competitions,
+        followedTeams: prefs.followedTeams,
+        allowLive: prefs.liveForMyMatches,
+      }),
     prefs.autoRefresh ? 30000 : null,
-    [prefs.competitions.join(',')],
+    [prefs.competitions.join(','), prefs.liveForMyMatches],
   );
 
-  const matches = feed.data?.items ?? [];
+  const matches = feed.data?.visible ?? [];
+  const allMatches = feed.data?.matches ?? [];
+  const standings = feed.data?.items ?? [];
   const liveCount = matches.filter((m) => m.status === 'live' || m.status === 'halftime').length;
 
   const filtered = useMemo(() => {
     if (filter === 'all') return matches;
     if (filter === 'live') return matches.filter((m) => m.status === 'live' || m.status === 'halftime');
     if (filter === 'today') return matches.filter((m) => m.status === 'scheduled');
+    if (filter === 'mine') return matches.filter((m) => m.israeliInterest);
     return matches.filter((m) => m.competition === filter);
   }, [matches, filter]);
+
+  // טבלה חיה לכל תחרות, כדי ששורת "המשמעות" בסיכום תדבר על המיקום
+  // האמיתי ולא על ניחוש. מחושבת פעם אחת לכל רינדור ולא לכל כרטיס.
+  const tables = useMemo(() => {
+    const out = new Map<CompetitionId, ReturnType<typeof buildLiveTable>>();
+    for (const c of prefs.competitions) {
+      out.set(c, buildLiveTable(standings, allMatches, c));
+    }
+    return out;
+  }, [standings, allMatches, prefs.competitions]);
 
   const toggleCard = (id: string) => {
     if (prefs.spoilerFree && !revealed.has(id)) {
@@ -49,7 +68,8 @@ export function Live({ prefs, onOpenMatchday }: Props) {
     { id: 'all', label: 'הכל' },
     { id: 'live', label: `חי${liveCount ? ` (${liveCount})` : ''}` },
     { id: 'today', label: 'בהמשך היום' },
-    ...COMPETITIONS.filter((c) => prefs.competitions.includes(c.id)).map((c) => ({ id: c.id as Filter, label: c.short })),
+    { id: 'mine', label: 'שלי' },
+    ...BROWSABLE.filter((c) => prefs.competitions.includes(c.id)).map((c) => ({ id: c.id as Filter, label: c.short })),
   ];
 
   return (
@@ -94,6 +114,7 @@ export function Live({ prefs, onOpenMatchday }: Props) {
               revealed={revealed.has(m.id)}
               onToggle={toggleCard}
               showStats={open === m.id}
+              table={tables.get(m.competition)}
             />
           ))
         )}

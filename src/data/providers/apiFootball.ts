@@ -1,17 +1,25 @@
-import type { CompetitionId, Match, MatchEvent, MatchStatus } from '../../lib/types';
-import { COMPETITIONS, competitionForProviderId } from '../competitions';
+import type { CompetitionId, Match, MatchEvent, MatchStatus, Standing } from '../../lib/types';
+import {
+  COMPETITIONS,
+  accentFor,
+  competitionForProviderId,
+  isIsraeliClub,
+  shortName,
+} from '../competitions';
 
 /**
  * אדפטר ל-API-Football‏ (api-sports.io).
  *
- * המפתח נקרא ממשתנה הסביבה VITE_API_FOOTBALL_KEY. שים לב: כל משתנה VITE_*
- * נארז לתוך ה-bundle של הדפדפן וגלוי למשתמש. לשימוש אישי זה בסדר; לפרסום
- * ציבורי העבר את הקריאות דרך פרוקסי בצד שרת שמחזיק את המפתח.
+ * בארכיטקטורה הנוכחית רוב הנתונים מגיעים מהקאש הסטטי שה-Action בונה,
+ * והאדפטר הזה משמש בדפדפן רק לרענון חי של משחקים שסומנו כשלך. המפתח
+ * נקרא מ-VITE_API_FOOTBALL_KEY; כל משתנה VITE_* נארז ל-bundle וגלוי
+ * למי שפותח את הקוד, ולכן השאר אותו ריק אם האתר ציבורי — הקאש לבדו
+ * מספיק, ורק העדכון החי בזמן משחק יאבד.
  */
 
 const BASE = 'https://v3.football.api-sports.io';
 
-interface ApiTeam { name: string; logo: string }
+interface ApiTeam { id: number; name: string; logo: string }
 interface ApiFixture {
   fixture: { id: number; date: string; status: { short: string; elapsed: number | null } };
   league: { id: number };
@@ -21,32 +29,18 @@ interface ApiFixture {
   statistics?: { team: { name: string }; statistics: { type: string; value: number | string | null }[] }[];
 }
 
-const LIVE_CODES = new Set(['1H', '2H', 'ET', 'BT', 'P', 'LIVE']);
+const LIVE_CODES = new Set(['1H', '2H', 'ET', 'BT', 'P', 'LIVE', 'INT']);
 const DONE_CODES = new Set(['FT', 'AET', 'PEN']);
 
-function mapStatus(short: string): MatchStatus {
+export function mapStatus(short: string): MatchStatus {
   if (short === 'HT') return 'halftime';
   if (LIVE_CODES.has(short)) return 'live';
   if (DONE_CODES.has(short)) return 'finished';
-  if (short === 'PST' || short === 'CANC' || short === 'ABD') return 'postponed';
+  if (short === 'PST' || short === 'CANC' || short === 'ABD' || short === 'SUSP') return 'postponed';
   return 'scheduled';
 }
 
-function shortName(name: string): string {
-  const clean = name.replace(/\b(FC|CF|AFC|SC)\b/g, '').trim();
-  const words = clean.split(/\s+/);
-  if (words.length === 1) return clean.slice(0, 3).toUpperCase();
-  return words.map((w) => w[0]).join('').slice(0, 3).toUpperCase();
-}
-
-/** צבע יציב לכל קבוצה, כדי שהסמלים לא יקפצו בין רינדורים. */
-function accentFor(name: string): string {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
-  return `hsl(${h} 55% 42%)`;
-}
-
-function mapFixture(fx: ApiFixture, competition: CompetitionId): Match {
+export function mapFixture(fx: ApiFixture, competition: CompetitionId): Match {
   const status = mapStatus(fx.fixture.status.short);
   const elapsed = fx.fixture.status.elapsed;
 
@@ -66,8 +60,21 @@ function mapFixture(fx: ApiFixture, competition: CompetitionId): Match {
     status,
     clock: status === 'halftime' ? 'מחצית' : status === 'finished' ? 'סיום' : elapsed ? `'${elapsed}` : null,
     kickoff: fx.fixture.date,
-    home: { name: fx.teams.home.name, short: shortName(fx.teams.home.name), score: fx.goals.home, accent: accentFor(fx.teams.home.name) },
-    away: { name: fx.teams.away.name, short: shortName(fx.teams.away.name), score: fx.goals.away, accent: accentFor(fx.teams.away.name) },
+    home: {
+      name: fx.teams.home.name,
+      short: shortName(fx.teams.home.name),
+      score: fx.goals.home,
+      accent: accentFor(fx.teams.home.name),
+      providerId: fx.teams.home.id,
+    },
+    away: {
+      name: fx.teams.away.name,
+      short: shortName(fx.teams.away.name),
+      score: fx.goals.away,
+      accent: accentFor(fx.teams.away.name),
+      providerId: fx.teams.away.id,
+    },
+    israeliInterest: isIsraeliClub(fx.teams.home.name) || isIsraeliClub(fx.teams.away.name),
     events,
   };
 }
@@ -76,14 +83,14 @@ export function hasFootballKey(): boolean {
   return Boolean(import.meta.env.VITE_API_FOOTBALL_KEY);
 }
 
-async function call(path: string): Promise<ApiFixture[]> {
+async function call<T>(path: string): Promise<T[]> {
   const key = import.meta.env.VITE_API_FOOTBALL_KEY;
   if (!key) throw new Error('missing VITE_API_FOOTBALL_KEY');
 
   const res = await fetch(`${BASE}${path}`, { headers: { 'x-apisports-key': key } });
   if (!res.ok) throw new Error(`api-football ${res.status}`);
 
-  const body = (await res.json()) as { response: ApiFixture[]; errors?: unknown };
+  const body = (await res.json()) as { response: T[] };
   if (Array.isArray(body.response)) return body.response;
   throw new Error('api-football: unexpected payload');
 }
@@ -94,19 +101,32 @@ function providerIdsFor(competitions: CompetitionId[]): number[] {
     .flatMap((c) => c.providerIds ?? []);
 }
 
-/** כל המשחקים החיים בליגות שבתצורה. */
+/**
+ * רענון חי לקבוצת ליגות. שורפת קריאה אחת בלבד, ולכן נקראת רק כשיש
+ * באמת משחק שמעניין אותך על המסך.
+ */
 export async function fetchLiveFootball(competitions: CompetitionId[]): Promise<Match[]> {
   const ids = providerIdsFor(competitions);
   if (!ids.length) return [];
 
-  const rows = await call(`/fixtures?live=${ids.join('-')}`);
+  const rows = await call<ApiFixture>(`/fixtures?live=${ids.join('-')}`);
   return rows.flatMap((fx) => {
     const comp = competitionForProviderId(fx.league.id);
     return comp ? [mapFixture(fx, comp)] : [];
   });
 }
 
-/** לוח משחקים ליום מסוים (YYYY-MM-DD), כולל משחקים שטרם החלו והסתיימו. */
+/** משחק בודד, כולל אירועים — לרענון מסך המשחק. */
+export async function fetchFixture(fixtureId: string): Promise<Match | null> {
+  const raw = fixtureId.replace(/^af-/, '');
+  const rows = await call<ApiFixture>(`/fixtures?id=${raw}`);
+  const fx = rows[0];
+  if (!fx) return null;
+  const comp = competitionForProviderId(fx.league.id);
+  return comp ? mapFixture(fx, comp) : null;
+}
+
+/** לוח משחקים ליום מסוים (YYYY-MM-DD). */
 export async function fetchFootballByDate(date: string, competitions: CompetitionId[]): Promise<Match[]> {
   const day = new Date(date);
   // עונת כדורגל אירופית נפתחת באוגוסט ונחתמת במאי, ולכן חודשים ינואר-יוני
@@ -118,7 +138,7 @@ export async function fetchFootballByDate(date: string, competitions: Competitio
       const comp = competitionForProviderId(leagueId);
       if (!comp) return [];
       try {
-        const rows = await call(`/fixtures?date=${date}&league=${leagueId}&season=${season}`);
+        const rows = await call<ApiFixture>(`/fixtures?date=${date}&league=${leagueId}&season=${season}`);
         return rows.map((fx) => mapFixture(fx, comp));
       } catch {
         // ליגה בודדת שנכשלת לא מפילה את שאר הלוח
@@ -127,4 +147,53 @@ export async function fetchFootballByDate(date: string, competitions: Competitio
     }),
   );
   return batches.flat();
+}
+
+/* ------------------------------------------------------------------ */
+/* טבלאות                                                              */
+/* ------------------------------------------------------------------ */
+
+interface ApiStandingRow {
+  rank: number;
+  team: ApiTeam;
+  points: number;
+  goalsDiff: number;
+  group: string;
+  form: string | null;
+  description: string | null;
+  all: { played: number; win: number; draw: number; lose: number; goals: { for: number; against: number } };
+}
+
+interface ApiStandingsPayload {
+  league: { id: number; standings: ApiStandingRow[][] };
+}
+
+export function mapStandingRow(row: ApiStandingRow, competition: CompetitionId): Standing {
+  return {
+    competition,
+    rank: row.rank,
+    teamId: row.team.id,
+    team: row.team.name,
+    short: shortName(row.team.name),
+    accent: accentFor(row.team.name),
+    played: row.all.played,
+    won: row.all.win,
+    drawn: row.all.draw,
+    lost: row.all.lose,
+    goalsFor: row.all.goals.for,
+    goalsAgainst: row.all.goals.against,
+    points: row.points,
+    form: row.form,
+    group: row.group,
+    marker: row.description,
+  };
+}
+
+export async function fetchStandings(competition: CompetitionId, season: number): Promise<Standing[]> {
+  const leagueId = COMPETITIONS.find((c) => c.id === competition)?.providerIds?.[0];
+  if (!leagueId) return [];
+
+  const rows = await call<ApiStandingsPayload>(`/standings?league=${leagueId}&season=${season}`);
+  const groups = rows[0]?.league.standings ?? [];
+  return groups.flat().map((row) => mapStandingRow(row, competition));
 }

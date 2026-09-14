@@ -1,21 +1,45 @@
 import type { Legionnaire } from '../lib/types';
 
 /**
- * רשימת הלגיונרים במעקב.
+ * רשימת הלגיונרים.
  *
- * זהו קובץ תצורה שנועד לעריכה ידנית. שיוך שחקן למועדון משתנה בכל חלון
- * העברות, ולכן הרשימה כאן היא נקודת פתיחה בלבד — ודא מול מקור עדכני
- * לפני שאתה נשען עליה, ועדכן שורות כאן כשלגיונר עובר מועדון.
+ * הרשימה נבנית משתי שכבות:
+ *  1. הבסיס כאן — נקודת פתיחה שמתעדכנת עם הקוד.
+ *  2. הקאש — שחקנים שה-Action זיהה אוטומטית לפי לאום ישראלי בליגות
+ *     שבמעקב (ראה scripts/build-cache.mjs).
+ * ומעליהן שכבה שלישית: עריכות ידניות שלך, שנשמרות במכשיר
+ * (src/lib/prefs.ts) ומנצחות תמיד — הוספה של שחקן שלא זוהה, והסתרה של
+ * מי שכבר לא מעניין.
  *
- * השדה club מושווה מול שמות הקבוצות שמגיעים מספק הנתונים, בהשוואה
- * סלחנית (הכלה דו-כיוונית), כך ש-"Portland" יתאים גם ל-"Portland Trail
- * Blazers". אם שחקן לא מזוהה — התאם את השם לזה שהספק מחזיר.
+ * שיוך שחקן למועדון משתנה בכל חלון העברות. השכבה האוטומטית נועדה בדיוק
+ * לכך; אם שחקן מופיע במועדון הלא נכון, ערוך אותו מהאפליקציה במקום
+ * לתקן כאן.
  */
-export const LEGIONNAIRES: Legionnaire[] = [
+export const BASE_LEGIONNAIRES: Legionnaire[] = [
   { id: 'lg-solomon', name: 'מנור סולומון', club: 'Villarreal', competition: 'champions-league', sport: 'football', position: 'כנף', accent: '#f5c518' },
   { id: 'lg-gloukh', name: 'אוסקר גלוך', club: 'RB Salzburg', competition: 'champions-league', sport: 'football', position: 'קשר התקפי', accent: '#c8102e' },
   { id: 'lg-abada', name: 'ליאל אבדה', club: 'Charlotte FC', competition: 'premier-league', sport: 'football', position: 'כנף', accent: '#1a85c8' },
-  { id: 'lg-khalaili', name: 'אנאן ח׳לאילי', club: 'Slavia Prague', competition: 'europa-conference', sport: 'football', position: 'כנף', accent: '#8b1e2d' },
-  { id: 'lg-peretz', name: 'דור פרץ', club: 'AEK Athens', competition: 'europa-conference', sport: 'football', position: 'קשר', accent: '#f2c200' },
+  { id: 'lg-khalaili', name: 'אנאן ח׳לאילי', club: 'Slavia Praha', competition: 'conference-league', sport: 'football', position: 'כנף', accent: '#8b1e2d' },
+  { id: 'lg-peretz', name: 'דור פרץ', club: 'AEK Athens', competition: 'conference-league', sport: 'football', position: 'קשר', accent: '#f2c200' },
   { id: 'lg-avdija', name: 'דני אבדיה', club: 'Portland Trail Blazers', competition: 'nba', sport: 'basketball', position: 'פורוורד', accent: '#c0492f' },
 ];
+
+/**
+ * מיזוג שלוש השכבות לרשימה אחת.
+ * עריכה ידנית דורסת רשומה עם אותו id, והסתרה מוציאה אותה לגמרי.
+ */
+export function mergeLegionnaires(
+  base: Legionnaire[],
+  detected: Legionnaire[],
+  custom: Legionnaire[],
+  hiddenIds: string[],
+): Legionnaire[] {
+  const byId = new Map<string, Legionnaire>();
+  for (const p of [...base, ...detected, ...custom]) {
+    byId.set(p.id, { ...byId.get(p.id), ...p });
+  }
+  const hidden = new Set(hiddenIds);
+  return [...byId.values()]
+    .filter((p) => !hidden.has(p.id) && !p.hidden)
+    .sort((a, b) => a.name.localeCompare(b.name, 'he'));
+}

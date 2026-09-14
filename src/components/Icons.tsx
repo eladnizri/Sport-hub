@@ -71,3 +71,12 @@ export function CloseIcon(p: IconProps) {
     </svg>
   );
 }
+
+export function TableIcon(p: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" {...p}>
+      <rect {...stroke} x="3.5" y="4.5" width="17" height="15" rx="2.5" />
+      <path {...stroke} d="M3.5 9.5h17M3.5 14.5h17M9 9.5V19.5" />
+    </svg>
+  );
+}

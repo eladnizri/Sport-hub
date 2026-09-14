@@ -270,15 +270,16 @@ input, select { font: inherit; color: inherit; }
 .tabbar-inner {
   max-width: 520px; margin: 0 auto;
   height: var(--tab-h);
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  display: grid; grid-template-columns: repeat(5, 1fr);
 }
 .tab {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 5px;
   color: var(--muted);
-  font-size: 12px; font-weight: 600;
+  font-size: 11.5px; font-weight: 600;
   transition: color .15s ease;
 }
+.tab svg { flex-shrink: 0; }
 .tab[aria-current='page'] { color: var(--green); font-weight: 700; }
 .tab svg { width: 24px; height: 24px; }
 
@@ -369,4 +370,238 @@ input, select { font: inherit; color: inherit; }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}
+
+/* ------------------------------------------------------------------ */
+/* טבלה חיה                                                            */
+/* ------------------------------------------------------------------ */
+
+.chips {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  padding: 0 4px 14px;
+}
+.chip.on { background: var(--green); color: #fff; }
+.chip.wide { width: 100%; justify-content: center; padding: 13px; }
+.chip.primary { background: var(--green); color: #fff; }
+.chip.primary:disabled { opacity: .45; }
+.chip.danger { background: var(--red-soft); color: var(--red); }
+
+.table-scroll { overflow-x: auto; margin: 0 -4px; }
+
+.league-table {
+  width: 100%;
+  /* מתחת לרוחב הזה העמודות נדחסות ועמודת הכושר נחתכת; עדיף שהטבלה
+     תגלול אופקית בתוך המכל שלה מאשר שתאבד מידע. */
+  min-width: 420px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.league-table th {
+  text-align: right;
+  font-size: 11.5px; font-weight: 700;
+  color: var(--muted);
+  padding: 0 5px 10px;
+  white-space: nowrap;
+}
+.league-table th.num, .league-table td.num { text-align: center; }
+.league-table td {
+  padding: 9px 5px;
+  border-top: 1px solid var(--line);
+  vertical-align: middle;
+}
+.league-table tr.is-live-row td { background: rgba(216, 235, 224, .35); }
+.league-table tr.is-mine td { box-shadow: inset 0 -2px 0 var(--green-soft); }
+
+.league-table .rank { width: 44px; }
+.rank-inner {
+  display: flex; align-items: center; gap: 5px;
+  font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.move { font-size: 10px; font-weight: 700; }
+.move.up { color: var(--green); }
+.move.down { color: var(--red); }
+.move.flat { color: var(--muted); }
+
+.league-table .team { min-width: 150px; }
+.team-inner { display: flex; align-items: center; gap: 9px; }
+.crest.sm {
+  width: 26px; height: 26px;
+  border-radius: 9px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 10px; font-weight: 800;
+  flex-shrink: 0;
+}
+.team-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.team-name { font-weight: 600; white-space: nowrap; }
+.team-sub { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.team-sub.live { color: var(--red); font-weight: 600; }
+
+.league-table .dim { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.league-table .num { direction: ltr; unicode-bidi: isolate; }
+.league-table .pts { font-weight: 800; font-variant-numeric: tabular-nums; }
+.pts-delta { font-style: normal; font-size: 10.5px; color: var(--green); margin-right: 2px; }
+
+.form-cell { min-width: 58px; }
+.form-dots { display: inline-flex; gap: 3px; }
+.form-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.form-dot.win { background: var(--green); }
+.form-dot.draw { background: var(--muted); }
+.form-dot.loss { background: var(--red); }
+
+.scenario {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 11px 12px;
+  border-radius: var(--r-tile);
+  background: var(--tile);
+  font-size: 14.5px; font-weight: 600; line-height: 1.45;
+  margin-bottom: 8px;
+}
+.scenario-mark {
+  width: 4px; align-self: stretch; border-radius: var(--r-pill);
+  background: var(--muted); flex-shrink: 0;
+}
+.scenario.up { background: var(--green-soft); }
+.scenario.up .scenario-mark { background: var(--green); }
+.scenario.down { background: var(--red-soft); }
+.scenario.down .scenario-mark { background: var(--red); }
+
+/* ------------------------------------------------------------------ */
+/* סיכום שלוש שורות                                                    */
+/* ------------------------------------------------------------------ */
+
+.narrative {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: var(--r-tile);
+  background: var(--tile);
+  text-align: right;
+}
+.nar-row {
+  display: grid;
+  grid-template-columns: 68px 1fr;
+  gap: 8px;
+  font-size: 14px; line-height: 1.5;
+  padding: 4px 0;
+}
+.nar-label { font-size: 11.5px; font-weight: 700; color: var(--muted); padding-top: 3px; }
+.nar-by { font-size: 11px; color: var(--muted); margin: 8px 0 0; }
+
+/* ------------------------------------------------------------------ */
+/* תיק לגיונר                                                          */
+/* ------------------------------------------------------------------ */
+
+.dossier { border-top: 1px solid var(--line); }
+.dossier:first-of-type { border-top: none; }
+
+.dossier-head {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; padding: 12px 0;
+  background: none; border: none; text-align: right;
+  cursor: pointer; font: inherit; color: inherit;
+}
+.dossier-head .r-main { flex: 1; min-width: 0; }
+.dossier-head .r-sub {
+  font-size: 13px; color: var(--muted); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dossier-head .r-title { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+
+.dossier-end { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; }
+
+.avatar {
+  width: 42px; height: 42px; border-radius: 14px;
+  display: grid; place-items: center;
+  font-size: 14px; font-weight: 800; color: #fff;
+  flex: none;
+}
+.avatar.sm { width: 32px; height: 32px; border-radius: 11px; font-size: 11px; }
+
+.spark {
+  /* הסדר נקבע כאן ולא על ידי כיוון הדף: rtl מציב את הילד הראשון מימין,
+     כלומר הישן ביותר מימין והחדש ביותר משמאל — כמו קריאה בעברית. */
+  direction: rtl;
+  display: flex; align-items: flex-end; gap: 3px;
+  height: 28px; width: 52px;
+}
+.spark-bar {
+  flex: 1;
+  border-radius: 2px;
+  background: var(--tile-strong);
+  min-height: 2px;
+}
+.spark-bar.start { background: var(--green); }
+.spark-bar.zero { background: var(--red-soft); }
+
+.trend { font-size: 11px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.trend.up { color: var(--green); }
+.trend.down { color: var(--red); }
+
+.dossier-body { padding: 4px 0 16px; }
+
+.appearances { list-style: none; margin: 14px 0 0; padding: 0; }
+.appearances li {
+  display: grid;
+  grid-template-columns: 62px 1fr auto auto;
+  gap: 10px; align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.app-date { color: var(--muted); font-weight: 600; white-space: nowrap; }
+.app-opp { color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-min {
+  font-weight: 700; font-variant-numeric: tabular-nums; color: var(--muted);
+  direction: ltr; unicode-bidi: isolate; white-space: nowrap;
+}
+.app-min.start { color: var(--green); }
+.app-contrib { font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
+
+.next-up {
+  display: flex; flex-direction: column; gap: 3px;
+  margin-top: 14px; padding: 11px 12px;
+  border-radius: var(--r-tile);
+  background: var(--tile-warm);
+  font-size: 13.5px; font-weight: 600;
+}
+.next-up .label { font-size: 11px; color: var(--amber); font-weight: 700; }
+
+/* ------------------------------------------------------------------ */
+/* ניהול רשימת הלגיונרים                                               */
+/* ------------------------------------------------------------------ */
+
+.legion-list { margin-bottom: 14px; }
+.legion-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.legion-row:first-child { border-top: none; }
+.legion-row.off { opacity: .45; }
+.legion-row .r-main { flex: 1; min-width: 0; }
+.legion-row .r-title { font-weight: 700; font-size: 14.5px; }
+.legion-row .r-sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.legion-actions { display: flex; gap: 6px; }
+.legion-actions .chip { padding: 7px 11px; font-size: 12.5px; }
+
+.add-form { display: flex; flex-direction: column; gap: 11px; }
+.add-form label { display: flex; flex-direction: column; gap: 5px; }
+.add-form label span { font-size: 12.5px; font-weight: 700; color: var(--ink-soft); }
+.add-form input, .add-form select {
+  padding: 11px 12px;
+  border-radius: var(--r-tile);
+  border: 1px solid var(--line);
+  background: var(--tile);
+  font: inherit; font-size: 15px;
+  color: var(--ink);
+}
+.add-form input:focus, .add-form select:focus {
+  outline: 2px solid var(--green-soft);
+  outline-offset: 1px;
+}
+.form-actions { display: flex; gap: 8px; }
+.form-actions .chip { flex: 1; justify-content: center; padding: 12px; }
+
+.dossier-head .r-status {
+  font-size: 11px; font-weight: 700; color: var(--ink-soft);
+  margin-top: 3px;
 }
