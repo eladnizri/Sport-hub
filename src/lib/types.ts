@@ -89,31 +89,37 @@ export interface Standing {
 }
 
 /**
- * שורת טבלה אחרי שהחלנו עליה את המשחקים שרצים כרגע.
+ * שורת טבלה אחרי שהחלנו עליה את משחקי היום של הקבוצה.
  *
- * `rank` הוא המיקום המוקרן — איפה הקבוצה תהיה אם כל המשחקים החיים
- * ייגמרו בתוצאתם הנוכחית. `baseRank` הוא המיקום לפני המחזור.
+ * `rank` הוא המיקום אחרי היום: אם המשחק כבר הסתיים — התוצאה האמיתית;
+ * אם עוד לא התחיל — הקרנה לפי ניצחון. `baseRank` הוא המיקום שממנו
+ * יוצאים, לפני משחקי היום.
  */
-export interface LiveTableRow extends Standing {
+export interface TableRow extends Standing {
   baseRank: number;
   basePoints: number;
-  /** שערים לפני המשחק החי — בסיס לחישוב תרחישים */
+  /** שערים לפני משחק היום — בסיס לחישוב תרחישים */
   baseGoalsFor: number;
   baseGoalsAgainst: number;
   /** חיובי = עלייה בטבלה */
   rankDelta: number;
   pointsDelta: number;
-  /** המשחק החי שמזיז את השורה הזאת, אם יש */
-  liveMatchId?: string;
-  liveLabel?: string;
+  /** משחק היום שמזיז את השורה הזאת, אם יש */
+  todayMatchId?: string;
+  /** תיאור עובדתי של משחק היום: "2-0 מול בית״ר" או "היום נגד בית״ר" */
+  todayLabel?: string;
+  /** true אם משחק היום כבר הסתיים; false אם עדיין לפניו */
+  todayFinished?: boolean;
 }
 
 export interface TableScenario {
   competition: CompetitionId;
-  /** משפט אחד: "ניצחון והפועל ב״ש עוברת למקום 2" */
+  /** משפט אחד: "ניצחון היום ומכבי חיפה עוברת למקום 2" */
   text: string;
   teamId: number;
   tone: 'up' | 'down' | 'hold';
+  /** true אם התרחיש מתאר תוצאה שכבר קרתה, לא תחזית */
+  realized: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -219,9 +225,68 @@ export interface TransferItem {
 }
 
 /* ------------------------------------------------------------------ */
+/* חדשות                                                                */
+/* ------------------------------------------------------------------ */
+
+export type NewsCategory = 'result' | 'table' | 'transfer' | 'headline';
+
+/**
+ * פריט בפיד הסקירה.
+ *
+ * שני מקורות מוזגים לאותו פיד: פריטים שנבנים מהנתונים שכבר יש לנו
+ * (תוצאה, תנועה בטבלה, עדכון העברה) — source: 'generated' — וכותרות
+ * אמיתיות שנשלפות מ-RSS בצד השרת, עם שם המקור. המסך תמיד מציג את
+ * source כדי ששום דבר לא יתחזה לכתבה אמיתית.
+ */
+export interface NewsItem {
+  id: string;
+  category: NewsCategory;
+  /** שורה אחת או שתיים, תלוי בקטגוריה */
+  text: string;
+  competition?: CompetitionId;
+  /** שמות קבוצות (כפי שהספק מחזיר) שהפריט נוגע להן — למיון לפי מעגל המעקב */
+  teams?: string[];
+  publishedAt: string; // ISO
+  source: 'generated' | string;
+  url?: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* מצב קבוצה                                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * כרטיס "מה קורה" לקבוצה אחת — לא לייב, שלוש עובדות: איפה בטבלה,
+ * מה קרה במשחק האחרון, מתי הבא. נבנה מעל הנתונים הקיימים, לא נשמר
+ * בנפרד.
+ */
+export interface TeamStatus {
+  /** שם הקבוצה כפי שהספק מחזיר */
+  team: string;
+  short: string;
+  accent: string;
+  teamId?: number;
+  competition: CompetitionId;
+  table: (TableRow & { gapText: string | null }) | null;
+  lastResult: {
+    opponent: string;
+    scoreFor: number;
+    scoreAgainst: number;
+    date: string;
+    outcome: 'win' | 'draw' | 'loss';
+    home: boolean;
+    /** סיכום שלוש השורות למשחק, אם יש */
+    narrative: MatchNarrative | null;
+  } | null;
+  nextMatch: { opponent: string; kickoff: string; home: boolean } | null;
+  scenario: TableScenario | null;
+  legionnaire: LegionnaireDossier | null;
+}
+
+/* ------------------------------------------------------------------ */
 
 /** מאיפה הנתונים באמת הגיעו, מוצג במסך כדי ששום מספר לא יתחזה לאמיתי. */
-export type FeedSource = 'live' | 'cache' | 'demo';
+export type FeedSource = 'cache' | 'demo';
 
 export interface FeedResult<T> {
   items: T[];

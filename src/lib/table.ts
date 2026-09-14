@@ -1,19 +1,20 @@
 import type {
   CompetitionId,
-  LiveTableRow,
   Match,
   Standing,
+  TableRow,
   TableScenario,
 } from './types';
 import { displayName, isIsraeliClub, normalize } from '../data/competitions';
 
 /**
- * טבלה חיה.
+ * הטבלה, אחרי החלת משחקי היום של כל קבוצה.
  *
  * הספק מחזיר טבלה שמשקפת רק משחקים שהסתיימו. כאן מחילים עליה את
- * המשחקים שרצים כרגע — בהנחה שהתוצאה הנוכחית היא התוצאה הסופית —
- * ומחזירים גם את המיקום המוקרן וגם את המיקום שממנו יצאנו, כדי שהמסך
- * יוכל להראות את התנועה ולא רק את השורה.
+ * משחקי היום: אם משחק כבר הסתיים — התוצאה האמיתית; אם עוד לא התחיל —
+ * שום דבר לא זז, אבל המשחק מסומן כדי ש-buildScenarios יוכל לתאר מה
+ * ניצחון או הפסד היום היו עושים. זו לא טבלה חיה שרצה תוך כדי משחק —
+ * היא מתעדכנת פעם או פעמיים ביום, יחד עם הקאש.
  *
  * המיון מבוסס על חוקי הכרעה כלליים (נקודות, הפרש, שערי זכות). ליגות
  * מסוימות מכריעות קודם במפגשים הישירים, ולכן שוויון נקודות עשוי
@@ -21,63 +22,69 @@ import { displayName, isIsraeliClub, normalize } from '../data/competitions';
  * היא הקובעת, ואנחנו מציגים את ההפרש כהקרנה — לא כעובדה.
  */
 
-interface TeamDelta {
-  points: number;
-  goalsFor: number;
-  goalsAgainst: number;
+interface TodayInfo {
   matchId: string;
+  finished: boolean;
   label: string;
+  delta?: { points: number; goalsFor: number; goalsAgainst: number };
 }
 
-const FINISHED_ENOUGH = new Set<Match['status']>(['live', 'halftime']);
+function isSameDay(iso: string, now: Date): boolean {
+  const d = new Date(iso);
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
 
-/** נקודות שהקבוצה תיקח אם המשחק ייגמר כרגע. */
+/** נקודות שהקבוצה מקבלת מתוצאה סופית. */
 function pointsFor(scored: number, conceded: number): number {
   if (scored > conceded) return 3;
   if (scored === conceded) return 1;
   return 0;
 }
 
-function matchLabel(status: Match['status'], clock: string | null): string {
-  if (status === 'halftime') return 'מחצית';
-  return clock ?? 'חי';
-}
-
 /**
- * ממפה כל קבוצה שנמצאת כרגע במשחק חי לשינוי שהמשחק מייצר לה.
+ * ממפה כל קבוצה עם משחק היום למה שקרה (או עומד לקרות) לה.
  * המפתח הוא שם מנורמל, כי לא תמיד יש לנו מזהה ספק בשני הצדדים.
  */
-function collectDeltas(matches: Match[], competition: CompetitionId): Map<string, TeamDelta> {
-  const deltas = new Map<string, TeamDelta>();
+function collectToday(matches: Match[], competition: CompetitionId, now: Date): Map<string, TodayInfo> {
+  const out = new Map<string, TodayInfo>();
 
   for (const m of matches) {
     if (m.competition !== competition) continue;
-    if (!FINISHED_ENOUGH.has(m.status)) continue;
-    if (m.home.score === null || m.away.score === null) continue;
+    if (!isSameDay(m.kickoff, now)) continue;
 
-    const label = matchLabel(m.status, m.clock);
+    const finished = m.status === 'finished' && m.home.score !== null && m.away.score !== null;
 
-    deltas.set(normalize(m.home.name), {
-      points: pointsFor(m.home.score, m.away.score),
-      goalsFor: m.home.score,
-      goalsAgainst: m.away.score,
+    out.set(normalize(m.home.name), {
       matchId: m.id,
-      label: `${label} · ${m.home.score}-${m.away.score} מול ${displayName(m.away.name)}`,
+      finished,
+      label: finished
+        ? `${m.home.score}-${m.away.score} מול ${displayName(m.away.name)}`
+        : `היום נגד ${displayName(m.away.name)}`,
+      delta: finished
+        ? { points: pointsFor(m.home.score!, m.away.score!), goalsFor: m.home.score!, goalsAgainst: m.away.score! }
+        : undefined,
     });
 
-    deltas.set(normalize(m.away.name), {
-      points: pointsFor(m.away.score, m.home.score),
-      goalsFor: m.away.score,
-      goalsAgainst: m.home.score,
+    out.set(normalize(m.away.name), {
       matchId: m.id,
-      label: `${label} · ${m.away.score}-${m.home.score} מול ${displayName(m.home.name)}`,
+      finished,
+      label: finished
+        ? `${m.away.score}-${m.home.score} מול ${displayName(m.home.name)}`
+        : `היום נגד ${displayName(m.home.name)}`,
+      delta: finished
+        ? { points: pointsFor(m.away.score!, m.home.score!), goalsFor: m.away.score!, goalsAgainst: m.home.score! }
+        : undefined,
     });
   }
 
-  return deltas;
+  return out;
 }
 
-function compareRows(a: LiveTableRow, b: LiveTableRow): number {
+function compareRows(a: TableRow, b: TableRow): number {
   if (b.points !== a.points) return b.points - a.points;
   const diffA = a.goalsFor - a.goalsAgainst;
   const diffB = b.goalsFor - b.goalsAgainst;
@@ -88,23 +95,25 @@ function compareRows(a: LiveTableRow, b: LiveTableRow): number {
 }
 
 /**
- * הטבלה אחרי החלת המשחקים החיים.
- * אם אין משחקים חיים בתחרות, מוחזרת הטבלה כפי שהיא עם הפרשים אפס.
+ * הטבלה אחרי החלת משחקי היום.
+ * אם אין לתחרות משחקים היום, מוחזרת הטבלה כפי שהיא עם הפרשים אפס.
  */
-export function buildLiveTable(
+export function buildTable(
   standings: Standing[],
   matches: Match[],
   competition: CompetitionId,
-): LiveTableRow[] {
+  now = new Date(),
+): TableRow[] {
   const base = standings
     .filter((s) => s.competition === competition)
     .sort((a, b) => a.rank - b.rank);
   if (!base.length) return [];
 
-  const deltas = collectDeltas(matches, competition);
+  const today = collectToday(matches, competition, now);
 
-  const rows: LiveTableRow[] = base.map((s) => {
-    const delta = deltas.get(normalize(s.team));
+  const rows: TableRow[] = base.map((s) => {
+    const info = today.get(normalize(s.team));
+    const delta = info?.delta;
     return {
       ...s,
       baseRank: s.rank,
@@ -120,8 +129,9 @@ export function buildLiveTable(
       goalsAgainst: s.goalsAgainst + (delta?.goalsAgainst ?? 0),
       rankDelta: 0,
       pointsDelta: delta?.points ?? 0,
-      liveMatchId: delta?.matchId,
-      liveLabel: delta?.label,
+      todayMatchId: info?.matchId,
+      todayLabel: info?.label,
+      todayFinished: info?.finished,
     };
   });
 
@@ -146,14 +156,13 @@ function ordinal(rank: number): string {
 /**
  * מחשב מחדש את הטבלה כאילו קבוצה אחת סיימה בתוצאה אחרת, ומחזיר את
  * המיקום שהיא הייתה מקבלת. כך אפשר לומר "ניצחון מעלה למקום 2" בלי
- * לנחש — הטבלה באמת מחושבת שוב.
+ * לנחש — הטבלה באמת מחושבת שוב, מנקודת הבסיס שלפני משחקי היום.
  */
-function rankIfPoints(rows: LiveTableRow[], teamId: number, points: number): number {
+function rankIfPoints(rows: TableRow[], teamId: number, points: number): number {
   const hypothetical = rows.map((r) => {
     if (r.teamId !== teamId) return r;
-    // מוציאים את תרומת המשחק החי ומחזירים תרומה משוערת: ניצחון בהפרש
-    // שער אחד, תיקו שומר על ההפרש, הפסד בשער. זו ההנחה הצנועה ביותר —
-    // תוצאה רחבה יותר רק תשפר את המיקום, לא תרע אותו.
+    // הנחה צנועה: ניצחון בהפרש שער אחד, תיקו שומר על ההפרש, הפסד
+    // בשער. תוצאה רחבה יותר רק תשפר את המיקום, לא תרע אותו.
     const swing = points === 3 ? 1 : points === 1 ? 0 : -1;
     return {
       ...r,
@@ -167,53 +176,61 @@ function rankIfPoints(rows: LiveTableRow[], teamId: number, points: number): num
 }
 
 /**
- * משפטי תרחיש למשחקים שרצים כרגע — רק כאלה שבאמת משנים משהו.
- * קבוצה שמנצחת ונשארת באותו מקום לא מקבלת משפט; זה בדיוק החפירה
- * שאנחנו רוצים להימנע ממנה.
+ * משפטי תרחיש למשחקי היום — רק כאלה שבאמת משנים משהו.
+ *
+ * למשחק שהסתיים: עובדה על מה שקרה בפועל ("עלתה היום למקום 2").
+ * למשחק שעוד לא התחיל: תחזית ("ניצחון היום ותעלה למקום 2"). קבוצה
+ * שמשחקת ולא משנה כלום — בין אם ניצחה או הפסידה, בין אם התוצאה טרם
+ * נקבעה — לא מקבלת משפט; זה בדיוק החפירה שרוצים להימנע ממנה.
  */
 export function buildScenarios(
-  rows: LiveTableRow[],
+  rows: TableRow[],
   competition: CompetitionId,
   limit = 3,
 ): TableScenario[] {
   const out: TableScenario[] = [];
+  const today = new Map(rows.filter((r) => r.todayMatchId).map((r) => [r.teamId, r]));
 
-  for (const row of rows) {
-    if (!row.liveMatchId) continue;
-
-    const rankNow = row.rank;
-    const rankWin = rankIfPoints(rows, row.teamId, 3);
-    const rankLose = rankIfPoints(rows, row.teamId, 0);
+  for (const row of today.values()) {
     const name = displayName(row.team);
+    const pending = !row.todayFinished;
 
-    // התוצאה הנוכחית כבר מזיזה אותו — זה הסיפור החשוב ביותר
-    if (row.rankDelta !== 0) {
+    if (!pending) {
+      // המשחק הסתיים — מדווחים רק אם זה באמת הזיז אותה
+      if (row.rankDelta === 0) continue;
       out.push({
         competition,
         teamId: row.teamId,
         tone: row.rankDelta > 0 ? 'up' : 'down',
+        realized: true,
         text:
           row.rankDelta > 0
-            ? `${name} עולה כרגע למקום ${ordinal(rankNow)} — הייתה ${ordinal(row.baseRank)}`
-            : `${name} יורדת כרגע למקום ${ordinal(rankNow)} — הייתה ${ordinal(row.baseRank)}`,
+            ? `${name} עלתה היום למקום ${ordinal(row.rank)} — הייתה ${ordinal(row.baseRank)}`
+            : `${name} ירדה היום למקום ${ordinal(row.rank)} — הייתה ${ordinal(row.baseRank)}`,
       });
       continue;
     }
 
-    // התוצאה לא מזיזה, אבל תוצאה אחרת כן הייתה מזיזה
+    // המשחק עוד לא הסתיים — תחזית מנקודת הבסיס
+    const rankNow = row.baseRank;
+    const rankWin = rankIfPoints(rows, row.teamId, 3);
+    const rankLose = rankIfPoints(rows, row.teamId, 0);
+
     if (rankWin < rankNow) {
       out.push({
         competition,
         teamId: row.teamId,
         tone: 'up',
-        text: `ניצחון ו${name} עוברת למקום ${ordinal(rankWin)}`,
+        realized: false,
+        text: `ניצחון היום ו${name} עוברת למקום ${ordinal(rankWin)}`,
       });
     } else if (rankLose > rankNow) {
       out.push({
         competition,
         teamId: row.teamId,
         tone: 'down',
-        text: `הפסד ו${name} נופלת למקום ${ordinal(rankLose)}`,
+        realized: false,
+        text: `הפסד היום ו${name} נופלת למקום ${ordinal(rankLose)}`,
       });
     }
   }
@@ -232,10 +249,10 @@ export function buildScenarios(
 }
 
 /**
- * המרחק מהפסגה ומהמקומות שמעניינים, כמשפט אחד. משמש גם בשורת ההקשר
- * שמתחת למשחק וגם בסיכום שאחריו.
+ * המרחק מהפסגה ומהמקומות שמעניינים, כמשפט אחד. משמש גם בכרטיס הקבוצה
+ * וגם בסיכום אחרי משחק.
  */
-export function gapSentence(rows: LiveTableRow[], teamId: number): string | null {
+export function gapSentence(rows: TableRow[], teamId: number): string | null {
   const row = rows.find((r) => r.teamId === teamId);
   if (!row) return null;
 
@@ -259,4 +276,14 @@ export function gapSentence(rows: LiveTableRow[], teamId: number): string | null
     }
   }
   return `מקום ${row.rank} · ${gap} נקודות מהפסגה`;
+}
+
+/** שורת הטבלה של קבוצה מסוימת, לפי שם או מזהה ספק — לשימוש במסך הקבוצות. */
+export function rowForTeam(rows: TableRow[], team: string, teamId?: number): TableRow | null {
+  if (teamId != null) {
+    const byId = rows.find((r) => r.teamId === teamId);
+    if (byId) return byId;
+  }
+  const name = normalize(team);
+  return rows.find((r) => normalize(r.team) === name) ?? null;
 }

@@ -3,36 +3,24 @@ import { BROWSABLE, COMPETITIONS } from '../data/competitions';
 
 export interface Prefs {
   competitions: CompetitionId[];
-  /** מרענן אוטומטית כשיש משחק חי */
-  autoRefresh: boolean;
-  /** מסתיר תוצאות עד שנוגעים בכרטיס */
-  spoilerFree: boolean;
-  /** קופץ ישירות למצב יום משחק כשרצים 3 משחקים ומעלה */
-  autoMatchday: boolean;
-  /**
-   * מרשה פוליניג חי מהדפדפן למשחקים שסומנו כשלך. כיבוי מבטיח שהאפליקציה
-   * לא תשרוף אף קריאת API מעבר למה שה-Action כבר שרף.
-   */
-  liveForMyMatches: boolean;
   /** לגיונרים שהוספת ידנית */
   customLegionnaires: Legionnaire[];
   /** לגיונרים שהוסתרו מהרשימה האוטומטית */
   hiddenLegionnaireIds: string[];
-  /** קבוצות שסימנת במעקב — שמות כפי שהספק מחזיר אותם */
+  /** קבוצות שהוספת ידנית למעגל המעקב, מעבר לישראליות ולמועדוני הלגיונרים */
   followedTeams: string[];
+  /** קבוצות מהמעגל האוטומטי (ישראליות/לגיונרים) שהסרת */
+  hiddenTeams: string[];
 }
 
-const KEY = 'sport-hub:prefs:v2';
+const KEY = 'sport-hub:prefs:v3';
 
 export const DEFAULT_PREFS: Prefs = {
   competitions: BROWSABLE.map((c) => c.id),
-  autoRefresh: true,
-  spoilerFree: false,
-  autoMatchday: false,
-  liveForMyMatches: true,
   customLegionnaires: [],
   hiddenLegionnaireIds: [],
   followedTeams: [],
+  hiddenTeams: [],
 };
 
 export function loadPrefs(): Prefs {
@@ -53,6 +41,7 @@ export function loadPrefs(): Prefs {
       customLegionnaires: parsed.customLegionnaires ?? [],
       hiddenLegionnaireIds: parsed.hiddenLegionnaireIds ?? [],
       followedTeams: parsed.followedTeams ?? [],
+      hiddenTeams: parsed.hiddenTeams ?? [],
     };
   } catch {
     return DEFAULT_PREFS;
@@ -67,7 +56,7 @@ export function savePrefs(prefs: Prefs): void {
   }
 }
 
-/** החלק של ההעדפות שרלוונטי לשכבת הנתונים. */
+/** החלק של ההעדפות שרלוונטי למיזוג רשימת הלגיונרים. */
 export function legionPrefs(prefs: Prefs) {
   return { custom: prefs.customLegionnaires, hiddenIds: prefs.hiddenLegionnaireIds };
 }

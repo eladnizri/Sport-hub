@@ -103,6 +103,18 @@ export function isIsraeliClub(name: string): boolean {
   return ISRAELI_SET.has(normalize(name));
 }
 
+/**
+ * השוואת שמות מועדונים סלחנית: הספקים לא תמיד מסכימים על הצורה
+ * המלאה ("Portland" מול "Portland Trail Blazers"), ולכן בודקים הכלה
+ * דו-כיוונית על השם המנורמל, לא שוויון מדויק.
+ */
+export function clubNamesMatch(a: string, b: string): boolean {
+  const na = normalize(a);
+  const nb = normalize(b);
+  if (!na || !nb) return false;
+  return na === nb || na.includes(nb) || nb.includes(na);
+}
+
 export function competitionName(id: CompetitionId): string {
   return COMPETITION_MAP[id]?.name ?? id;
 }

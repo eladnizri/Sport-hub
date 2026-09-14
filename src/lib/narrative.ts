@@ -1,6 +1,6 @@
-import type { LiveTableRow, Match, MatchNarrative } from './types';
+import type { Match, MatchNarrative, TableRow } from './types';
 import { displayName, normalize } from '../data/competitions';
-import { gapSentence } from './liveTable';
+import { gapSentence } from './table';
 
 /**
  * סיכום שלוש שורות למשחק שהסתיים: מה הכריע, מי בלט, מה המשמעות.
@@ -10,12 +10,6 @@ import { gapSentence } from './liveTable';
  * scripts/build-cache.mjs) ומגיעה עם by: 'ai'. שתיהן ממלאות את אותו
  * מבנה, כך שהמסך לא צריך לדעת מי כתב.
  */
-
-function scoreLine(match: Match): string {
-  const home = displayName(match.home.name);
-  const away = displayName(match.away.name);
-  return `${home} ${match.home.score}-${match.away.score} ${away}`;
-}
 
 /** השחקן שהופיע הכי הרבה פעמים באירועי השערים. */
 function topScorer(match: Match): { name: string; goals: number } | null {
@@ -92,7 +86,7 @@ function standoutOf(match: Match): string {
  * מאתר את שורת הטבלה של צד במשחק. מזהה הספק הוא הדרך המדויקת, אבל הוא
  * לא תמיד קיים בשני הצדדים — ואז נופלים להשוואת שם מנורמלת.
  */
-function rowFor(table: LiveTableRow[], side: Match['home']): LiveTableRow | undefined {
+function rowFor(table: TableRow[], side: Match['home']): TableRow | undefined {
   if (side.providerId != null) {
     const byId = table.find((r) => r.teamId === side.providerId);
     if (byId) return byId;
@@ -101,7 +95,7 @@ function rowFor(table: LiveTableRow[], side: Match['home']): LiveTableRow | unde
   return table.find((r) => normalize(r.team) === name);
 }
 
-function meaningOf(match: Match, table: LiveTableRow[]): string {
+function meaningOf(match: Match, table: TableRow[]): string {
   const hs = match.home.score ?? 0;
   const as = match.away.score ?? 0;
 
@@ -124,7 +118,7 @@ function meaningOf(match: Match, table: LiveTableRow[]): string {
 }
 
 /** סיכום תבניתי. מחזיר null אם המשחק לא הסתיים או שאין תוצאה. */
-export function templateNarrative(match: Match, table: LiveTableRow[] = []): MatchNarrative | null {
+export function templateNarrative(match: Match, table: TableRow[] = []): MatchNarrative | null {
   if (match.status !== 'finished') return null;
   if (match.home.score === null || match.away.score === null) return null;
 
@@ -137,8 +131,6 @@ export function templateNarrative(match: Match, table: LiveTableRow[] = []): Mat
 }
 
 /** הסיכום להצגה: האפוי מהקאש אם יש, אחרת התבנית. */
-export function narrativeFor(match: Match, table: LiveTableRow[] = []): MatchNarrative | null {
+export function narrativeFor(match: Match, table: TableRow[] = []): MatchNarrative | null {
   return match.narrative ?? templateNarrative(match, table);
 }
-
-export { scoreLine };

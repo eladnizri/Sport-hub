@@ -2,17 +2,18 @@ import type {
   LegionnaireAppearance,
   Legionnaire,
   Match,
+  NewsItem,
   Standing,
   TransferItem,
 } from '../../lib/types';
 
 /**
- * הקאש הסטטי — מקור הנתונים הראשי של האפליקציה.
+ * הקאש הסטטי — מקור הנתונים היחיד של האפליקציה.
  *
- * GitHub Action מתוזמן מושך מ-api-football, כותב סיכומים, ומפרסם קובץ
- * JSON אחד יחד עם האתר. הדפדפן קורא רק את הקובץ: אין מפתח API בצד
- * הלקוח, אין חשיפה, והטעינה מיידית. קריאות חיות שמורות למשחקים
- * שסומנו כשלך (ראה src/lib/myMatches.ts).
+ * GitHub Action מתוזמן מושך מ-api-football ומ-RSS, כותב סיכומים,
+ * ומפרסם קובץ JSON אחד יחד עם האתר. הדפדפן קורא רק את הקובץ: אין
+ * מפתח API בצד הלקוח, אין חשיפה, והטעינה מיידית. זו אפליקציית סקירה
+ * ולא מעקב חי — אין שום קריאה חוזרת לספק מהדפדפן.
  */
 
 export interface Snapshot {
@@ -27,6 +28,8 @@ export interface Snapshot {
   /** לגיונרים שזוהו אוטומטית בצד השרת */
   legionnaires: Legionnaire[];
   transfers?: TransferItem[];
+  /** כותרות אמיתיות מ-RSS, אם המקור היה זמין בזמן הבנייה */
+  news?: NewsItem[];
 }
 
 const EMPTY: Snapshot = {
@@ -49,8 +52,11 @@ function snapshotUrl(): string {
 let inflight: Promise<Snapshot | null> | null = null;
 let cached: { at: number; value: Snapshot } | null = null;
 
-/** כמה זמן מחזיקים את הקובץ בזיכרון לפני בקשה חוזרת. */
-const MEMORY_TTL = 60_000;
+/**
+ * כמה זמן מחזיקים את הקובץ בזיכרון לפני בקשה חוזרת. זו אפליקציית
+ * סקירה שמתעדכנת בקאש כמה פעמים ביום — אין טעם לבדוק שוב תוך דקה.
+ */
+const MEMORY_TTL = 10 * 60_000;
 
 export async function loadSnapshot(force = false): Promise<Snapshot | null> {
   if (!force && cached && Date.now() - cached.at < MEMORY_TTL) return cached.value;

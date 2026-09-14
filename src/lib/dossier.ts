@@ -5,7 +5,7 @@ import type {
   LegionnaireTrend,
   Match,
 } from './types';
-import { displayName, normalize } from '../data/competitions';
+import { clubNamesMatch, displayName } from '../data/competitions';
 
 /**
  * בניית תיק הלגיונר.
@@ -23,13 +23,8 @@ export function playsIn(player: Legionnaire, match: Match): 'home' | 'away' | nu
     if (match.home.providerId === player.clubId) return 'home';
     if (match.away.providerId === player.clubId) return 'away';
   }
-  // נפילה להשוואת שמות סלחנית — "Portland" יתאים ל-"Portland Trail Blazers"
-  const club = normalize(player.club);
-  if (!club) return null;
-  const home = normalize(match.home.name);
-  const away = normalize(match.away.name);
-  if (home.includes(club) || club.includes(home)) return 'home';
-  if (away.includes(club) || club.includes(away)) return 'away';
+  if (clubNamesMatch(player.club, match.home.name)) return 'home';
+  if (clubNamesMatch(player.club, match.away.name)) return 'away';
   return null;
 }
 
