@@ -1,0 +1,78 @@
+name: Refresh sport data
+
+# מושך נתונים טריים, בונה את הקאש, ומפרסם מחדש את האתר.
+#
+# הלוח בנוי סביב תקציב 100 הקריאות היומי של השכבה החינמית: הרצות תכופות
+# בשעות שבהן באמת רצים משחקים (אחר הצהריים עד חצות בשעון ישראל), והרצה
+# אחת בבוקר שמרעננת טבלאות ולוח משחקים. כל הרצה מוגבלת ב-CALL_BUDGET,
+# כך שגם יום עמוס במיוחד לא חורג מהמכסה.
+on:
+  schedule:
+    # 06:00 בשעון ישראל — רענון בוקר: טבלאות ולוח היום
+    - cron: '0 4 * * *'
+    # כל שעה בין 13:00 ל-23:00 בשעון ישראל (משחקי ערב)
+    - cron: '0 11-21 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # ההיסטוריה של הופעות הלגיונרים נצברת בין הרצות. בלעדיה כל הרצה
+      # הייתה משלמת קריאות על אותם משחקים שוב, ומגמת הדקות מתאפסת.
+      - name: שחזור היסטוריית לגיונרים
+        uses: actions/cache/restore@v4
+        with:
+          path: public/data
+          key: sport-data-${{ github.run_id }}
+          restore-keys: |
+            sport-data-
+
+      - name: בניית הקאש
+        env:
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CALL_BUDGET: '18'
+          SUMMARY_BUDGET: '6'
+        run: npm run cache
+
+      - name: שמירת היסטוריית לגיונרים
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: public/data
+          key: sport-data-${{ github.run_id }}
+
+      - run: npm run build
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: refresh
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

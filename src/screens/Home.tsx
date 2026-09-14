@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { getLegionnaires, getMatches } from '../data';
 import { useFeed } from '../hooks/useFeed';
 import { greeting } from '../lib/format';
-import type { Prefs } from '../lib/prefs';
+import { displayName } from '../data/competitions';
+import { legionPrefs, type Prefs } from '../lib/prefs';
 import { MatchCard } from '../components/MatchCard';
 import { PageHead } from '../components/PageHead';
 import { SourceNote } from '../components/SourceNote';
@@ -26,11 +27,20 @@ export function Home({ prefs, onOpenSettings, onOpenMatchday, onNavigate }: Prop
     });
 
   const matchFeed = useFeed(
-    () => getMatches(prefs.competitions),
+    () =>
+      getMatches({
+        competitions: prefs.competitions,
+        followedTeams: prefs.followedTeams,
+        allowLive: prefs.liveForMyMatches,
+      }),
     prefs.autoRefresh ? 30000 : null,
-    [prefs.competitions.join(',')],
+    [prefs.competitions.join(','), prefs.liveForMyMatches],
   );
-  const legionFeed = useFeed(() => getLegionnaires(), prefs.autoRefresh ? 60000 : null, []);
+  const legionFeed = useFeed(
+    () => getLegionnaires({ prefs: legionPrefs(prefs), allowLive: prefs.liveForMyMatches }),
+    prefs.autoRefresh ? 60000 : null,
+    [prefs.hiddenLegionnaireIds.join(','), prefs.liveForMyMatches],
+  );
 
   const matches = matchFeed.data?.items ?? [];
   const reports = legionFeed.data?.items ?? [];
@@ -40,7 +50,10 @@ export function Home({ prefs, onOpenSettings, onOpenMatchday, onNavigate }: Prop
     const upcoming = matches.filter((m) => m.status === 'scheduled');
     const israeli = matches.filter((m) => m.israeliInterest);
     const playing = reports.filter((r) => r.status === 'playing');
-    const contributions = reports.reduce((sum, r) => sum + r.goals + r.assists, 0);
+    const contributions = reports.reduce(
+      (sum, r) => sum + (r.latest?.goals ?? 0) + (r.latest?.assists ?? 0),
+      0,
+    );
     return { live, upcoming, israeli, playing, contributions };
   }, [matches, reports]);
 
@@ -150,26 +163,24 @@ export function Home({ prefs, onOpenSettings, onOpenMatchday, onNavigate }: Prop
               {r.player.name.split(' ')[0].slice(0, 2)}
             </span>
             <div className="r-main">
-              <div className="r-title">{r.player.name}</div>
-              <div className="r-sub">{r.player.club} · מול {r.opponent}</div>
+              <div className="r-title">
+                {r.player.name}
+                {r.status === 'playing' && <i className="live-dot" />}
+              </div>
+              <div className="r-sub">{displayName(r.player.club)} · {r.standing}</div>
             </div>
             <div className="r-end">
-              {r.status === 'upcoming' ? (
-                <span className="badge">טרם שיחק</span>
-              ) : r.player.sport === 'basketball' ? (
-                <span className="badge green">{r.points} נק׳</span>
-              ) : r.goals + r.assists > 0 ? (
-                <span className="badge green">
-                  {r.minutes}׳ · {r.goals ? `${r.goals} ש׳` : ''}{r.goals && r.assists ? ' ' : ''}
-                  {r.assists ? `${r.assists} ב׳` : ''}
-                </span>
+              {r.trend === 'rising' ? (
+                <span className="badge green">בעלייה</span>
+              ) : r.trend === 'falling' ? (
+                <span className="badge warm">בירידה</span>
               ) : (
-                <span className="badge">{r.minutes} דק׳</span>
+                <span className="badge">{r.avgMinutes} דק׳ בממוצע</span>
               )}
             </div>
           </div>
         ))}
-        {reports.length === 0 && <p className="empty">טוען דוחות לגיונרים…</p>}
+        {reports.length === 0 && <p className="empty">טוען תיקי לגיונרים…</p>}
       </section>
 
       <SourceNote feed={matchFeed.data} />

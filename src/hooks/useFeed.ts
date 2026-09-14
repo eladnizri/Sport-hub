@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FeedResult } from '../lib/types';
 
-interface FeedState<T> {
-  data: FeedResult<T> | null;
+interface FeedState<R> {
+  data: R | null;
   loading: boolean;
   refresh: () => void;
 }
@@ -11,12 +11,12 @@ interface FeedState<T> {
  * טוען פיד ומרענן אותו במרווח קבוע. המרווח מתקבל מבחוץ כדי שהמסך יוכל
  * להאיץ כשיש משחק חי ולהאט כשאין.
  */
-export function useFeed<T>(
-  load: () => Promise<FeedResult<T>>,
+export function useFeed<R extends FeedResult<unknown>>(
+  load: () => Promise<R>,
   intervalMs: number | null,
   deps: unknown[],
-): FeedState<T> {
-  const [data, setData] = useState<FeedResult<T> | null>(null);
+): FeedState<R> {
+  const [data, setData] = useState<R | null>(null);
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
   const loadRef = useRef(load);
@@ -32,7 +32,15 @@ export function useFeed<T>(
         if (!cancelled) setData(result);
       })
       .catch(() => {
-        if (!cancelled) setData({ items: [], source: 'demo', fetchedAt: new Date().toISOString(), error: 'load failed' });
+        // הטעינה נכשלה לגמרי — מציגים פיד ריק שמסומן ככשל, במקום מסך תקוע
+        if (!cancelled) {
+          setData({
+            items: [],
+            source: 'demo',
+            fetchedAt: new Date().toISOString(),
+            error: 'load failed',
+          } as unknown as R);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

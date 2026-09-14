@@ -1,19 +1,43 @@
-import type { CompetitionId, FeedResult, LegionnaireReport, Match, TransferItem } from '../lib/types';
-import { demoLegionnaires, demoMatches, demoTransfers } from './providers/demo';
-import { fetchFootballByDate, fetchLiveFootball, hasFootballKey } from './providers/apiFootball';
-import { fetchNbaByDate, hasNbaKey } from './providers/balldontlie';
+import type {
+  CompetitionId,
+  FeedResult,
+  FeedSource,
+  Legionnaire,
+  LegionnaireAppearance,
+  LegionnaireDossier,
+  Match,
+  Standing,
+  TransferItem,
+} from '../lib/types';
+import { buildDossier, sortDossiers } from '../lib/dossier';
+import { isMine } from '../lib/myMatches';
+import { templateNarrative } from '../lib/narrative';
+import { buildLiveTable } from '../lib/liveTable';
+import { BASE_LEGIONNAIRES, mergeLegionnaires } from './legionnaires';
+import { demoAppearances, demoMatches, demoStandings, demoTransfers } from './providers/demo';
+import { loadSnapshot, type Snapshot } from './providers/cache';
+import { fetchLiveFootball, hasFootballKey } from './providers/apiFootball';
 
 /**
  * שכבת הנתונים היחידה שהמסכים מדברים איתה.
  *
- * אם הוגדר מפתח API — מושכים אמת. אם לא, או אם הקריאה נכשלה, נופלים
- * לספק הדמו ומסמנים את המקור כ-demo, כך שהמסך תמיד אומר את האמת על
- * מה שהוא מציג.
+ * סדר העדיפויות:
+ *  1. הקאש הסטטי שה-Action בנה — המקור הראשי. מהיר, בלי מפתחות בדפדפן.
+ *  2. רענון חי מ-api-football — רק אם יש מפתח בצד הלקוח ורק כשיש על
+ *     המסך משחק שסומן כשלך. כך תקציב 100 הקריאות ביום לא נשרף על
+ *     משחקים שלא אכפת לך מהם.
+ *  3. ספק הדמו — כשאין קאש ואין מפתח.
+ *
+ * המקור שבו השתמשנו בפועל מוחזר בכל תוצאה ומוצג במסך, כדי ששום מספר
+ * לא יתחזה למשהו שהוא לא.
  */
 
-function isoDate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+export interface LegionnairePrefs {
+  custom: Legionnaire[];
+  hiddenIds: string[];
 }
+
+const NO_CUSTOM: LegionnairePrefs = { custom: [], hiddenIds: [] };
 
 function sortMatches(matches: Match[]): Match[] {
   const rank: Record<Match['status'], number> = {
@@ -24,85 +48,224 @@ function sortMatches(matches: Match[]): Match[] {
   );
 }
 
-export function providersConfigured(): { football: boolean; nba: boolean } {
-  return { football: hasFootballKey(), nba: hasNbaKey() };
+function isToday(iso: string, now: Date): boolean {
+  const d = new Date(iso);
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
 }
 
-export async function getMatches(
-  competitions: CompetitionId[],
-  date = new Date(),
-): Promise<FeedResult<Match>> {
-  const fetchedAt = new Date().toISOString();
-  const { football, nba } = providersConfigured();
-  const wantsNba = competitions.includes('nba');
-
-  if (!football && !nba) {
-    return {
-      items: sortMatches(demoMatches(date).filter((m) => competitions.includes(m.competition))),
-      source: 'demo',
-      fetchedAt,
-    };
-  }
-
-  const day = isoDate(date);
-  const errors: string[] = [];
-  const collected: Match[] = [];
-
-  if (football) {
-    try {
-      const [live, scheduled] = await Promise.all([
-        fetchLiveFootball(competitions),
-        fetchFootballByDate(day, competitions),
-      ]);
-      // המשחקים החיים מנצחים על גרסת הלוח היומי של אותו משחק
-      const liveIds = new Set(live.map((m) => m.id));
-      collected.push(...live, ...scheduled.filter((m) => !liveIds.has(m.id)));
-    } catch (err) {
-      errors.push(String(err));
-    }
-  }
-
-  if (nba && wantsNba) {
-    try {
-      collected.push(...(await fetchNbaByDate(day)));
-    } catch (err) {
-      errors.push(String(err));
-    }
-  }
-
-  // ליגות שאין להן ספק מוגדר עדיין (יורוליג, וכל ליגה שנכשלה) מגיעות מהדמו
-  const covered = new Set(collected.map((m) => m.competition));
-  const gaps = competitions.filter((c) => !covered.has(c));
-  const filler = gaps.length
-    ? demoMatches(date).filter((m) => gaps.includes(m.competition))
-    : [];
-
-  const items = sortMatches([...collected, ...filler].filter((m) => competitions.includes(m.competition)));
-
+/** גיבוי דמו מלא, בצורת snapshot — כך שכל שאר הקוד לא צריך להבדיל. */
+function demoSnapshot(now: Date): Snapshot {
+  const matches = demoMatches(now);
   return {
-    items,
-    source: collected.length ? 'live' : 'demo',
-    fetchedAt,
-    error: errors.length ? errors.join(' | ') : undefined,
+    builtAt: now.toISOString(),
+    matches,
+    standings: demoStandings(),
+    appearances: demoAppearances(now, matches),
+    legionnaires: [],
+    transfers: demoTransfers(now),
   };
 }
 
-export async function getLegionnaires(date = new Date()): Promise<FeedResult<LegionnaireReport>> {
-  // דוחות הלגיונרים נבנים מעל לוח המשחקים, כך שהם משתפרים אוטומטית
-  // ברגע שספק אמיתי מחובר.
-  const matches = await getMatches(
-    ['ligat-haal', 'premier-league', 'champions-league', 'europa-conference', 'nba', 'euroleague'],
+interface Resolved {
+  snapshot: Snapshot;
+  source: FeedSource;
+  error?: string;
+}
+
+/**
+ * טוען את הקאש ומחליף בו את המשחקים החיים בגרסה טרייה, אם וכאשר יש
+ * על המסך משחק שמעניין אותך. הקריאה החיה נעשית פעם אחת לכל הליגות.
+ */
+async function resolve(
+  competitions: CompetitionId[],
+  legionnaires: Legionnaire[],
+  followedTeams: string[],
+  now: Date,
+  allowLive: boolean,
+): Promise<Resolved> {
+  const snapshot = await loadSnapshot();
+
+  if (!snapshot) {
+    return { snapshot: demoSnapshot(now), source: 'demo' };
+  }
+
+  if (!allowLive || !hasFootballKey()) {
+    return { snapshot, source: 'cache' };
+  }
+
+  // יש בקאש משחק חי שמעניין אותך? רק אז שורפים קריאה.
+  const worthIt = snapshot.matches.some(
+    (m) =>
+      (m.status === 'live' || m.status === 'halftime') &&
+      competitions.includes(m.competition) &&
+      isMine(m, legionnaires, followedTeams),
+  );
+  if (!worthIt) return { snapshot, source: 'cache' };
+
+  try {
+    const live = await fetchLiveFootball(competitions);
+    if (!live.length) return { snapshot, source: 'cache' };
+
+    const liveById = new Map(live.map((m) => [m.id, m]));
+    const merged = snapshot.matches.map((m) => liveById.get(m.id) ?? m);
+    // משחק שהתחיל אחרי בניית הקאש עדיין לא נמצא בו
+    for (const m of live) if (!merged.some((x) => x.id === m.id)) merged.push(m);
+
+    return { snapshot: { ...snapshot, matches: merged }, source: 'live' };
+  } catch (err) {
+    return { snapshot, source: 'cache', error: String(err) };
+  }
+}
+
+export function providersConfigured(): { football: boolean } {
+  return { football: hasFootballKey() };
+}
+
+export interface MatchQuery {
+  competitions: CompetitionId[];
+  legionnaires?: Legionnaire[];
+  followedTeams?: string[];
+  date?: Date;
+  /** מותר לשרוף קריאה חיה עבור משחק שסומן כשלך */
+  allowLive?: boolean;
+}
+
+/**
+ * לוח המשחקים להצגה.
+ *
+ * הסינון כאן הוא מה שמפריד בין "כל מה שיש בקאש" לבין "מה שאתה רוצה
+ * לראות": רק תחרויות שבחרת (ולכן ה-NBA, שמסומן legionnaireOnly, לא
+ * נכנס), ורק היום — למעט משחק שרץ עכשיו וגלש מעבר לחצות.
+ */
+function visibleMatches(snapshot: Snapshot, competitions: CompetitionId[], date: Date): Match[] {
+  return sortMatches(
+    snapshot.matches
+      .filter((m) => competitions.includes(m.competition))
+      .filter((m) => isToday(m.kickoff, date) || m.status === 'live' || m.status === 'halftime')
+      .map((m) => {
+        if (m.narrative || m.status !== 'finished') return m;
+        // משחק שהסתיים אחרי בניית הקאש לא קיבל סיכום אפוי — בונים תבנית
+        const table = buildLiveTable(snapshot.standings, snapshot.matches, m.competition);
+        return { ...m, narrative: templateNarrative(m, table) ?? undefined };
+      }),
+  );
+}
+
+export async function getMatches({
+  competitions,
+  legionnaires = BASE_LEGIONNAIRES,
+  followedTeams = [],
+  date = new Date(),
+  allowLive = true,
+}: MatchQuery): Promise<FeedResult<Match>> {
+  const { snapshot, source, error } = await resolve(
+    competitions, legionnaires, followedTeams, date, allowLive,
+  );
+
+  return {
+    items: visibleMatches(snapshot, competitions, date),
+    source,
+    fetchedAt: new Date().toISOString(),
+    builtAt: snapshot.builtAt,
+    error,
+  };
+}
+
+/** הטבלאות הגולמיות, לפני החלת משחקים חיים. */
+export async function getStandings(date = new Date()): Promise<FeedResult<Standing>> {
+  const snapshot = (await loadSnapshot()) ?? demoSnapshot(date);
+  return {
+    items: snapshot.standings,
+    source: snapshot.builtAt ? 'cache' : 'demo',
+    fetchedAt: new Date().toISOString(),
+    builtAt: snapshot.builtAt,
+  };
+}
+
+/**
+ * הטבלה החיה יחד עם לוח המשחקים שבנה אותה — המסך צריך את שניהם, ואין
+ * טעם לטעון את הקאש פעמיים.
+ */
+export async function getTableView(query: MatchQuery): Promise<
+  FeedResult<Standing> & { matches: Match[]; visible: Match[] }
+> {
+  const date = query.date ?? new Date();
+  const { snapshot, source, error } = await resolve(
+    query.competitions,
+    query.legionnaires ?? BASE_LEGIONNAIRES,
+    query.followedTeams ?? [],
     date,
+    query.allowLive ?? true,
   );
   return {
-    items: demoLegionnaires(date, matches.items),
-    source: matches.source,
-    fetchedAt: matches.fetchedAt,
+    items: snapshot.standings,
+    // `matches` הוא הסט המלא, כי חישוב הטבלה החיה צריך גם משחקים
+    // בתחרויות שלא מוצגות כרגע. `visible` הוא מה שמותר להציג.
+    matches: snapshot.matches,
+    visible: visibleMatches(snapshot, query.competitions, date),
+    source,
+    fetchedAt: new Date().toISOString(),
+    builtAt: snapshot.builtAt,
+    error,
   };
+}
+
+export interface LegionQuery {
+  prefs?: LegionnairePrefs;
+  date?: Date;
+  allowLive?: boolean;
+}
+
+/** רשימת הלגיונרים אחרי מיזוג שלוש השכבות. */
+export async function getLegionnaireList(prefs: LegionnairePrefs = NO_CUSTOM): Promise<Legionnaire[]> {
+  const snapshot = await loadSnapshot();
+  return mergeLegionnaires(
+    BASE_LEGIONNAIRES,
+    snapshot?.legionnaires ?? [],
+    prefs.custom,
+    prefs.hiddenIds,
+  );
+}
+
+export async function getLegionnaires({
+  prefs = NO_CUSTOM,
+  date = new Date(),
+  allowLive = true,
+}: LegionQuery = {}): Promise<FeedResult<LegionnaireDossier>> {
+  const players = await getLegionnaireList(prefs);
+  const { snapshot, source, error } = await resolve(
+    [], players, [], date, allowLive,
+  );
+
+  const appearances: Record<string, LegionnaireAppearance[]> = snapshot.appearances ?? {};
+
+  const items = sortDossiers(
+    players.map((player) =>
+      buildDossier({
+        player,
+        history: appearances[player.id] ?? [],
+        matches: snapshot.matches,
+        now: date,
+      }),
+    ),
+  );
+
+  return { items, source, fetchedAt: new Date().toISOString(), builtAt: snapshot.builtAt, error };
 }
 
 export async function getTransfers(date = new Date()): Promise<FeedResult<TransferItem>> {
-  // אין ספק העברות ציבורי אמין; הפיד נשען על מקור עריכתי. עד לחיבור
-  // כזה, הרדאר רץ על הפיד המקומי ומסומן כדמו.
-  return { items: demoTransfers(date), source: 'demo', fetchedAt: new Date().toISOString() };
+  const snapshot = await loadSnapshot();
+  const items = snapshot?.transfers?.length ? snapshot.transfers : demoTransfers(date);
+  return {
+    items,
+    // אין ספק העברות ציבורי אמין, ולכן הרדאר נשען על פיד עריכתי. עד
+    // שיחובר כזה, התוכן מסומן כדמו ולא מתחזה לדיווח אמיתי.
+    source: snapshot?.transfers?.length ? 'cache' : 'demo',
+    fetchedAt: new Date().toISOString(),
+    builtAt: snapshot?.builtAt,
+  };
 }

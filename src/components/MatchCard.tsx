@@ -1,6 +1,7 @@
-import type { Match } from '../lib/types';
-import { COMPETITION_MAP } from '../data/competitions';
+import type { LiveTableRow, Match } from '../lib/types';
+import { COMPETITION_MAP, displayName } from '../data/competitions';
 import { clockTime, countdown } from '../lib/format';
+import { narrativeFor } from '../lib/narrative';
 
 interface Props {
   match: Match;
@@ -8,16 +9,19 @@ interface Props {
   revealed: boolean;
   onToggle: (id: string) => void;
   showStats?: boolean;
+  /** הטבלה החיה של התחרות — מזינה את שורת "מה המשמעות" בסיכום */
+  table?: LiveTableRow[];
 }
 
 function Crest({ short, accent }: { short: string; accent: string }) {
   return <span className="crest" style={{ background: accent }}>{short}</span>;
 }
 
-export function MatchCard({ match, spoilerFree, revealed, onToggle, showStats }: Props) {
+export function MatchCard({ match, spoilerFree, revealed, onToggle, showStats, table = [] }: Props) {
   const comp = COMPETITION_MAP[match.competition];
   const isLive = match.status === 'live' || match.status === 'halftime';
   const hidden = spoilerFree && !revealed && match.status !== 'scheduled';
+  const narrative = match.status === 'finished' ? narrativeFor(match, table) : null;
 
   const renderScore = (value: number | null) => {
     if (hidden) return '•';
@@ -43,7 +47,7 @@ export function MatchCard({ match, spoilerFree, revealed, onToggle, showStats }:
       <div className="score-line">
         <div className="side">
           <Crest short={match.home.short} accent={match.home.accent} />
-          <span className="name">{match.home.name}</span>
+          <span className="name">{displayName(match.home.name)}</span>
         </div>
         <span className="score">{renderScore(match.home.score)}</span>
       </div>
@@ -51,7 +55,7 @@ export function MatchCard({ match, spoilerFree, revealed, onToggle, showStats }:
       <div className="score-line">
         <div className="side">
           <Crest short={match.away.short} accent={match.away.accent} />
-          <span className="name dim">{match.away.name}</span>
+          <span className="name dim">{displayName(match.away.name)}</span>
         </div>
         <span className="score">{renderScore(match.away.score)}</span>
       </div>
@@ -83,6 +87,26 @@ export function MatchCard({ match, spoilerFree, revealed, onToggle, showStats }:
               {`'${e.minute}`} {e.text}
             </span>
           ))}
+        </div>
+      )}
+
+      {showStats && !hidden && narrative && (
+        <div className="narrative">
+          <div className="nar-row">
+            <span className="nar-label">מה הכריע</span>
+            <span>{narrative.verdict}</span>
+          </div>
+          <div className="nar-row">
+            <span className="nar-label">מי בלט</span>
+            <span>{narrative.standout}</span>
+          </div>
+          <div className="nar-row">
+            <span className="nar-label">המשמעות</span>
+            <span>{narrative.meaning}</span>
+          </div>
+          {narrative.by === 'template' && (
+            <p className="nar-by">נבנה מהנתונים · לא נוסח על ידי מודל שפה</p>
+          )}
         </div>
       )}
 
