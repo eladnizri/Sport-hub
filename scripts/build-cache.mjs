@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 /**
- * בונה את הקאש הסטטי שהאפליקציה קוראת.
+ * בונה את הקאש הסטטי שהאפליקציה קוראת — זו אפליקציית סקירה, לא מעקב
+ * חי, ולכן הקאש הזה הוא מקור הנתונים היחיד; הדפדפן לא קורא לשום ספק.
  *
  * רץ בתוך GitHub Action לפי לוח זמנים, מושך מ-api-football בתוך תקציב
- * קריאות קשיח, מסכם משחקים שהסתיימו עם Groq, וכותב קובץ JSON אחד:
- *   public/data/snapshot.json
+ * קריאות קשיח, מושך כותרות מ-RSS, מסכם משחקים שהסתיימו עם Groq, וכותב
+ * קובץ JSON אחד: public/data/snapshot.json
  *
- * היסטוריית הופעות הלגיונרים נצברת בין הרצות (public/data/history.json),
- * כדי שלא נשלם קריאות על אותו משחק פעמיים — ולכן מגמת הדקות משתפרת עם
- * הזמן במקום להתאפס בכל הרצה.
+ * שני חוזים חשובים ששאר הקוד (src/lib/table.ts, src/lib/news.ts)
+ * נשען עליהם:
+ *  1. standings משקף תמיד את המצב *לפני* משחקי היום — ולכן מתעדכן
+ *     לכל היותר פעם ביום לכל תחרות, לא בתגובה מיידית למשחק שהסתיים.
+ *  2. היסטוריית הופעות הלגיונרים נצברת בין הרצות (public/data/history.json),
+ *     כדי שלא נשלם קריאות על אותו משחק פעמיים.
  *
  * הרצה מקומית:
  *   API_FOOTBALL_KEY=xxx GROQ_API_KEY=yyy npm run cache
@@ -20,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { Budget } from './lib/budget.mjs';
 import { ApiFootball } from './lib/apiFootball.mjs';
 import { summarize } from './lib/groq.mjs';
+import { fetchRss } from './lib/rss.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DIR = join(ROOT, 'public', 'data');
@@ -67,6 +72,46 @@ const CALL_BUDGET = Number(process.env.CALL_BUDGET ?? 18);
 
 /** כמה משחקים מסכמים עם מודל שפה בכל הרצה. */
 const SUMMARY_BUDGET = Number(process.env.SUMMARY_BUDGET ?? 6);
+
+/**
+ * פיד/י RSS לכותרות אמיתיות. לא אומתו מול המקורות בזמן הכתיבה — הרשת
+ * מהסביבה שבה זה נכתב חסומה לדומיינים חיצוניים, ולכן ייתכן שכתובת כאן
+ * לא תעבוד או שהפורמט שלה השתנה. הפרסר (scripts/lib/rss.mjs) נכשל
+ * בשקט אם כתובת לא עובדת — הדיגסט הנבנה מהנתונים ממשיך לרוץ בלעדיה.
+ * בדוק את הכתובות, ותקן/הוסף כאן אם צריך.
+ */
+const NEWS_FEEDS = (process.env.NEWS_FEEDS || 'https://www.one.co.il/Rss/RssItem.aspx?FolderID=698')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean)
+  .map((url) => ({ url, source: hostnameOf(url) }));
+
+/** כמה כותרות שומרים בקאש בסך הכל, אחרי סינון וסינון-רלוונטיות. */
+const NEWS_LIMIT = 15;
+
+function hostnameOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return 'חדשות';
+  }
+}
+
+/**
+ * מילות מפתח לסינון רלוונטיות מכותרת חדשות כללית. פיד ישראלי כללי
+ * מכיל הרבה שלא קשור לכדורגל שאנחנו עוקבים אחריו — הכותרת עצמה
+ * בעברית, ולכן הסינון כאן בעברית ולא מול שמות הספק באנגלית.
+ */
+const NEWS_KEYWORDS = [
+  'כדורגל', 'ליגת העל', 'ליגת האלופות', 'פרמייר ליג', 'ליגה האירופית', 'ליגת הקונפרנס',
+  'מכבי תל אביב', 'מכבי חיפה', 'הפועל באר שבע', 'הפועל תל אביב', 'בית"ר ירושלים',
+  'מכבי נתניה', 'הפועל ירושלים', 'בני סכנין', 'עירוני קרית שמונה',
+  ...LEGIONNAIRES.map((p) => p.name),
+];
+
+function isRelevantHeadline(title) {
+  return NEWS_KEYWORDS.some((k) => title.includes(k));
+}
 
 /* ------------------------------------------------------------------ */
 /* עזרים                                                               */
@@ -253,42 +298,45 @@ async function main() {
     if (new Date(m.kickoff).getTime() >= cutoff) matches.set(m.id, m);
   }
 
-  /* --- טבלאות: רק כשיש טעם, ורק אם נשאר תקציב --- */
+  /* --- טבלאות: פעם ביום לכל תחרות, לא יותר --- */
 
+  // חוזה חשוב: standings חייב לשקף את המצב *לפני* משחקי היום, כי
+  // src/lib/table.ts מחיל עליו את תוצאות היום בצד הלקוח. אם היינו
+  // מרעננים את הטבלה מיד אחרי שמשחק נגמר — באותה הרצה שבה נמשך גם
+  // המשחק עצמו — הטבלה הטרייה כבר הייתה כוללת אותו, וההחלה בצד הלקוח
+  // הייתה סופרת אותו פעמיים. לכן טבלה מתעדכנת לכל היותר פעם ביום,
+  // בהרצה הראשונה של אותו יום — ולא בתגובה למשחק שהסתיים.
   const standings = [];
   const season = seasonFor(now);
+  const today = isoDate(now);
+  const standingsDates = { ...(previous?.standingsDates ?? {}) };
 
-  // הטבלה זזה רק אחרי שמשחק נגמר. אם מאז ההרצה הקודמת לא הסתיים כלום,
-  // אין סיבה לשלם עליה שוב — לוקחים את מה שכבר יש.
-  const finishedNow = [...matches.values()].filter((m) => m.status === 'finished');
-  const knownFinished = new Set(
-    (previous?.matches ?? []).filter((m) => m.status === 'finished').map((m) => m.id),
-  );
-  const somethingEnded = finishedNow.some((m) => !knownFinished.has(m.id));
-  const staleTable =
-    !previous?.standings?.length ||
-    !previous?.builtAt ||
-    now.getTime() - new Date(previous.builtAt).getTime() > 12 * 3600 * 1000;
+  for (const comp of COMPETITIONS) {
+    if (!comp.hasTable) continue;
 
-  if (somethingEnded || staleTable) {
-    for (const comp of COMPETITIONS) {
-      if (!comp.hasTable) continue;
-      if (!budget.can(1)) {
-        budget.skip(`טבלה ${comp.id}`);
-        continue;
+    if (standingsDates[comp.id] === today) {
+      // כבר רועננה היום — משתמשים במה שיש
+      for (const s of previous?.standings ?? []) {
+        if (s.competition === comp.id) standings.push(s);
       }
-      const rows = await api.standings(comp.leagueIds[0], season);
-      const groups = rows?.[0]?.league?.standings ?? [];
-      for (const group of groups) {
-        for (const row of group) standings.push(mapStandingRow(row, comp.id));
-      }
+      continue;
     }
-  }
 
-  // תחרות שלא נמשכה בהרצה הזאת שומרת על הטבלה הקודמת שלה
-  const fetched = new Set(standings.map((s) => s.competition));
-  for (const s of previous?.standings ?? []) {
-    if (!fetched.has(s.competition)) standings.push(s);
+    if (!budget.can(1)) {
+      budget.skip(`טבלה ${comp.id}`);
+      // לא רועננה, אבל עדיין צריך למלא מהקאש הקודם כדי שהמסך לא יתרוקן
+      for (const s of previous?.standings ?? []) {
+        if (s.competition === comp.id) standings.push(s);
+      }
+      continue;
+    }
+
+    const rows = await api.standings(comp.leagueIds[0], season);
+    const groups = rows?.[0]?.league?.standings ?? [];
+    for (const group of groups) {
+      for (const row of group) standings.push(mapStandingRow(row, comp.id));
+    }
+    standingsDates[comp.id] = today;
   }
 
   /* --- אירועים וסטטיסטיקות שחקנים: רק למשחקים שמעניינים אותך --- */
@@ -351,6 +399,33 @@ async function main() {
     }
   }
 
+  /* --- כותרות אמיתיות מ-RSS --- */
+
+  // לא תלוי בתקציב api-football כלל — מקור נפרד, נכשל בשקט לבד
+  const rawHeadlines = (
+    await Promise.all(NEWS_FEEDS.map(({ url, source }) => fetchRss(url).then((items) => items.map((i) => ({ ...i, source })))))
+  ).flat();
+
+  const seenLinks = new Set();
+  const news = rawHeadlines
+    .filter((h) => isRelevantHeadline(h.title))
+    .filter((h) => {
+      const key = h.link ?? h.title;
+      if (seenLinks.has(key)) return false;
+      seenLinks.add(key);
+      return true;
+    })
+    .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
+    .slice(0, NEWS_LIMIT)
+    .map((h, i) => ({
+      id: `rss-${h.source}-${i}-${new Date(h.publishedAt).getTime()}`,
+      category: 'headline',
+      text: h.title,
+      publishedAt: h.publishedAt,
+      source: h.source,
+      url: h.link ?? undefined,
+    }));
+
   /* --- כתיבה --- */
 
   const snapshot = {
@@ -358,9 +433,13 @@ async function main() {
     calls: budget.used,
     matches: [...matches.values()].sort((a, b) => a.kickoff.localeCompare(b.kickoff)),
     standings,
+    // מתי כל תחרות רועננה לאחרונה — לא חלק מהחוזה שהאפליקציה קוראת,
+    // רק מצב פנימי של הסקריפט בין הרצות
+    standingsDates,
     appearances: trimHistory(history),
     legionnaires: [],
     transfers: previous?.transfers ?? [],
+    news,
   };
 
   await mkdir(OUT_DIR, { recursive: true });
@@ -369,7 +448,7 @@ async function main() {
 
   console.log(
     `[cache] ${snapshot.matches.length} משחקים · ${standings.length} שורות טבלה · ` +
-      `${written} סיכומים חדשים · ${budget.used}/${budget.limit} קריאות`,
+      `${written} סיכומים חדשים · ${news.length} כותרות · ${budget.used}/${budget.limit} קריאות`,
   );
 }
 

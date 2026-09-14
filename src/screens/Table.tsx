@@ -1,19 +1,19 @@
 import { useMemo, useState } from 'react';
 import { getTableView } from '../data';
 import { useFeed } from '../hooks/useFeed';
-import { buildLiveTable, buildScenarios } from '../lib/liveTable';
+import { buildTable, buildScenarios } from '../lib/table';
 import { displayName, TABLE_COMPETITIONS } from '../data/competitions';
 import type { Prefs } from '../lib/prefs';
-import type { CompetitionId, LiveTableRow } from '../lib/types';
+import type { CompetitionId, TableRow } from '../lib/types';
 import { PageHead } from '../components/PageHead';
 import { SourceNote } from '../components/SourceNote';
 
 /**
- * הטבלה החיה.
+ * הטבלאות.
  *
- * שורת הטבלה מציגה את המיקום המוקרן — איפה הקבוצה תהיה אם המשחקים
- * שרצים כרגע ייגמרו בתוצאתם הנוכחית — לצד החץ שמראה מאיפה היא הגיעה.
- * זה ההבדל בין טבלה שמתעדכנת אחרי המחזור לטבלה שזזה תוך כדי.
+ * שורת הטבלה מציגה את המיקום אחרי משחקי היום — עובדה אם המשחק כבר
+ * הסתיים, תחזית אם עוד לא — לצד החץ שמראה מאיפה הקבוצה הגיעה. זו לא
+ * טבלה שרצה תוך כדי משחק: היא מתעדכנת יחד עם הקאש, כמה פעמים ביום.
  */
 
 function FormDots({ form }: { form: string | null }) {
@@ -39,14 +39,14 @@ function MoveArrow({ delta }: { delta: number }) {
   );
 }
 
-function Row({ row, highlight }: { row: LiveTableRow; highlight: boolean }) {
-  const moving = row.liveMatchId != null;
+function Row({ row, highlight }: { row: TableRow; highlight: boolean }) {
+  const today = row.todayMatchId != null;
   return (
-    <tr className={`${moving ? 'is-live-row' : ''}${highlight ? ' is-mine' : ''}`}>
+    <tr className={`${today ? 'is-today-row' : ''}${highlight ? ' is-mine' : ''}`}>
       <td className="rank">
         <div className="rank-inner">
           <span>{row.rank}</span>
-          {moving && <MoveArrow delta={row.rankDelta} />}
+          {today && row.todayFinished && <MoveArrow delta={row.rankDelta} />}
         </div>
       </td>
       <td className="team">
@@ -54,8 +54,8 @@ function Row({ row, highlight }: { row: LiveTableRow; highlight: boolean }) {
           <span className="crest sm" style={{ background: row.accent }}>{row.short}</span>
           <div className="team-text">
             <span className="team-name">{displayName(row.team)}</span>
-            {row.liveLabel ? (
-              <span className="team-sub live">{row.liveLabel}</span>
+            {row.todayLabel ? (
+              <span className="team-sub today">{row.todayLabel}</span>
             ) : row.marker ? (
               <span className="team-sub">{row.marker}</span>
             ) : null}
@@ -81,28 +81,23 @@ export function Table({ prefs }: { prefs: Prefs }) {
     : available[0]?.id ?? null;
 
   const feed = useFeed(
-    () =>
-      getTableView({
-        competitions: prefs.competitions,
-        followedTeams: prefs.followedTeams,
-        allowLive: prefs.liveForMyMatches,
-      }),
-    prefs.autoRefresh ? 60000 : null,
-    [prefs.competitions.join(','), prefs.liveForMyMatches],
+    () => getTableView(prefs.competitions),
+    null,
+    [prefs.competitions.join(',')],
   );
 
   const { rows, scenarios } = useMemo(() => {
-    if (!active || !feed.data) return { rows: [] as LiveTableRow[], scenarios: [] };
-    const built = buildLiveTable(feed.data.items, feed.data.matches, active);
+    if (!active || !feed.data) return { rows: [] as TableRow[], scenarios: [] };
+    const built = buildTable(feed.data.items, feed.data.matches, active);
     return { rows: built, scenarios: buildScenarios(built, active) };
   }, [active, feed.data]);
 
   const followed = new Set(prefs.followedTeams);
-  const movingCount = rows.filter((r) => r.liveMatchId).length;
+  const todayCount = rows.filter((r) => r.todayMatchId).length;
 
   return (
     <>
-      <PageHead eyebrow="מרוץ העונה" title="טבלה" />
+      <PageHead eyebrow="מרוץ העונה" title="טבלאות" />
 
       {available.length > 1 && (
         <div className="chips">
@@ -121,8 +116,8 @@ export function Table({ prefs }: { prefs: Prefs }) {
       {scenarios.length > 0 && (
         <section className="card">
           <div className="card-head">
-            <h2>מה זז עכשיו</h2>
-            <span className="meta">{movingCount} במשחק</span>
+            <h2>מה זז היום</h2>
+            <span className="meta">{todayCount} משחקים</span>
           </div>
           {scenarios.map((s, i) => (
             <div className={`scenario ${s.tone}`} key={i}>
@@ -131,8 +126,9 @@ export function Table({ prefs }: { prefs: Prefs }) {
             </div>
           ))}
           <p className="section-note">
-            הקרנה לפי התוצאות ברגע זה. שוויון נקודות נפתר אצלנו לפי הפרש
-            שערים; ליגות שמכריעות קודם במפגשים ישירים עשויות לסדר אחרת.
+            {scenarios.some((s) => !s.realized)
+              ? 'משחק שעוד לא הסתיים מקבל תחזית לפי ניצחון או הפסד. שוויון נקודות נפתר אצלנו לפי הפרש שערים; ליגות שמכריעות קודם במפגשים ישירים עשויות לסדר אחרת.'
+              : 'התנועה מחושבת מול המיקום שלפני משחקי היום.'}
           </p>
         </section>
       )}
@@ -140,7 +136,7 @@ export function Table({ prefs }: { prefs: Prefs }) {
       <section className="card">
         <div className="card-head">
           <h2>{available.find((c) => c.id === active)?.name ?? 'טבלה'}</h2>
-          {movingCount > 0 && <span className="badge live"><i className="live-dot" />חי</span>}
+          {todayCount > 0 && <span className="badge warm">{todayCount} משחקים היום</span>}
         </div>
 
         {feed.loading && !feed.data ? (

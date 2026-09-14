@@ -11,11 +11,11 @@
 import { readFileSync } from 'node:fs';
 
 function readEnvKey() {
-  if (process.env.VITE_API_FOOTBALL_KEY) return process.env.VITE_API_FOOTBALL_KEY;
+  if (process.env.API_FOOTBALL_KEY) return process.env.API_FOOTBALL_KEY;
   try {
     const line = readFileSync(new URL('../.env', import.meta.url), 'utf8')
       .split('\n')
-      .find((l) => l.trim().startsWith('VITE_API_FOOTBALL_KEY='));
+      .find((l) => l.trim().startsWith('API_FOOTBALL_KEY='));
     return line ? line.split('=').slice(1).join('=').trim() : '';
   } catch {
     return '';
@@ -24,7 +24,7 @@ function readEnvKey() {
 
 const key = readEnvKey();
 if (!key) {
-  console.error('\nלא נמצא מפתח. צור קובץ .env עם VITE_API_FOOTBALL_KEY=... ונסה שוב.\n');
+  console.error('\nלא נמצא מפתח. צור קובץ .env עם API_FOOTBALL_KEY=... ונסה שוב.\n');
   process.exit(1);
 }
 

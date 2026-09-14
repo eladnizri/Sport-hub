@@ -6,30 +6,28 @@ import type {
   LegionnaireAppearance,
   LegionnaireDossier,
   Match,
+  NewsItem,
   Standing,
+  TeamStatus,
   TransferItem,
 } from '../lib/types';
-import { buildDossier, sortDossiers } from '../lib/dossier';
-import { isMine } from '../lib/myMatches';
-import { templateNarrative } from '../lib/narrative';
-import { buildLiveTable } from '../lib/liveTable';
+import { buildDossier, playsIn, sortDossiers } from '../lib/dossier';
+import { circleRoster } from '../lib/circle';
+import { narrativeFor, templateNarrative } from '../lib/narrative';
+import { buildScenarios, buildTable, gapSentence, rowForTeam } from '../lib/table';
+import { buildNews } from '../lib/news';
+import { clubNamesMatch, displayName } from './competitions';
 import { BASE_LEGIONNAIRES, mergeLegionnaires } from './legionnaires';
 import { demoAppearances, demoMatches, demoStandings, demoTransfers } from './providers/demo';
 import { loadSnapshot, type Snapshot } from './providers/cache';
-import { fetchLiveFootball, hasFootballKey } from './providers/apiFootball';
 
 /**
  * שכבת הנתונים היחידה שהמסכים מדברים איתה.
  *
- * סדר העדיפויות:
- *  1. הקאש הסטטי שה-Action בנה — המקור הראשי. מהיר, בלי מפתחות בדפדפן.
- *  2. רענון חי מ-api-football — רק אם יש מפתח בצד הלקוח ורק כשיש על
- *     המסך משחק שסומן כשלך. כך תקציב 100 הקריאות ביום לא נשרף על
- *     משחקים שלא אכפת לך מהם.
- *  3. ספק הדמו — כשאין קאש ואין מפתח.
- *
- * המקור שבו השתמשנו בפועל מוחזר בכל תוצאה ומוצג במסך, כדי ששום מספר
- * לא יתחזה למשהו שהוא לא.
+ * זו אפליקציית סקירה, לא מעקב חי: המקור היחיד הוא הקאש הסטטי שה-Action
+ * בונה כמה פעמים ביום (ראה scripts/build-cache.mjs), ואם הוא לא זמין
+ * עדיין — ספק דמו. אין קריאה חוזרת לספק מהדפדפן בשום מסך. המקור
+ * שבו השתמשנו בפועל מוחזר בכל תוצאה ומוצג במסך.
  */
 
 export interface LegionnairePrefs {
@@ -38,15 +36,6 @@ export interface LegionnairePrefs {
 }
 
 const NO_CUSTOM: LegionnairePrefs = { custom: [], hiddenIds: [] };
-
-function sortMatches(matches: Match[]): Match[] {
-  const rank: Record<Match['status'], number> = {
-    live: 0, halftime: 1, scheduled: 2, finished: 3, postponed: 4,
-  };
-  return [...matches].sort(
-    (a, b) => rank[a.status] - rank[b.status] || a.kickoff.localeCompare(b.kickoff),
-  );
-}
 
 function isToday(iso: string, now: Date): boolean {
   const d = new Date(iso);
@@ -70,191 +59,90 @@ function demoSnapshot(now: Date): Snapshot {
   };
 }
 
-interface Resolved {
-  snapshot: Snapshot;
-  source: FeedSource;
-  error?: string;
-}
-
-/**
- * טוען את הקאש ומחליף בו את המשחקים החיים בגרסה טרייה, אם וכאשר יש
- * על המסך משחק שמעניין אותך. הקריאה החיה נעשית פעם אחת לכל הליגות.
- */
-async function resolve(
-  competitions: CompetitionId[],
-  legionnaires: Legionnaire[],
-  followedTeams: string[],
-  now: Date,
-  allowLive: boolean,
-): Promise<Resolved> {
+async function resolveSnapshot(now: Date): Promise<{ snapshot: Snapshot; source: FeedSource }> {
   const snapshot = await loadSnapshot();
-
-  if (!snapshot) {
-    return { snapshot: demoSnapshot(now), source: 'demo' };
-  }
-
-  if (!allowLive || !hasFootballKey()) {
-    return { snapshot, source: 'cache' };
-  }
-
-  // יש בקאש משחק חי שמעניין אותך? רק אז שורפים קריאה.
-  const worthIt = snapshot.matches.some(
-    (m) =>
-      (m.status === 'live' || m.status === 'halftime') &&
-      competitions.includes(m.competition) &&
-      isMine(m, legionnaires, followedTeams),
-  );
-  if (!worthIt) return { snapshot, source: 'cache' };
-
-  try {
-    const live = await fetchLiveFootball(competitions);
-    if (!live.length) return { snapshot, source: 'cache' };
-
-    const liveById = new Map(live.map((m) => [m.id, m]));
-    const merged = snapshot.matches.map((m) => liveById.get(m.id) ?? m);
-    // משחק שהתחיל אחרי בניית הקאש עדיין לא נמצא בו
-    for (const m of live) if (!merged.some((x) => x.id === m.id)) merged.push(m);
-
-    return { snapshot: { ...snapshot, matches: merged }, source: 'live' };
-  } catch (err) {
-    return { snapshot, source: 'cache', error: String(err) };
-  }
+  if (!snapshot) return { snapshot: demoSnapshot(now), source: 'demo' };
+  return { snapshot, source: 'cache' };
 }
 
-export function providersConfigured(): { football: boolean } {
-  return { football: hasFootballKey() };
+/** משחק שהסתיים ואין לו עדיין סיכום אפוי מקבל תבנית, בלי לגעת בקאש. */
+function withNarrative(match: Match, standings: Standing[], matches: Match[]): Match {
+  if (match.narrative || match.status !== 'finished') return match;
+  const table = buildTable(standings, matches, match.competition);
+  return { ...match, narrative: templateNarrative(match, table) ?? undefined };
 }
 
 export interface MatchQuery {
   competitions: CompetitionId[];
-  legionnaires?: Legionnaire[];
-  followedTeams?: string[];
   date?: Date;
-  /** מותר לשרוף קריאה חיה עבור משחק שסומן כשלך */
-  allowLive?: boolean;
 }
 
 /**
- * לוח המשחקים להצגה.
- *
- * הסינון כאן הוא מה שמפריד בין "כל מה שיש בקאש" לבין "מה שאתה רוצה
- * לראות": רק תחרויות שבחרת (ולכן ה-NBA, שמסומן legionnaireOnly, לא
- * נכנס), ורק היום — למעט משחק שרץ עכשיו וגלש מעבר לחצות.
+ * לוח המשחקים להצגה: רק תחרויות שבחרת, ורק היום.
  */
-function visibleMatches(snapshot: Snapshot, competitions: CompetitionId[], date: Date): Match[] {
-  return sortMatches(
-    snapshot.matches
-      .filter((m) => competitions.includes(m.competition))
-      .filter((m) => isToday(m.kickoff, date) || m.status === 'live' || m.status === 'halftime')
-      .map((m) => {
-        if (m.narrative || m.status !== 'finished') return m;
-        // משחק שהסתיים אחרי בניית הקאש לא קיבל סיכום אפוי — בונים תבנית
-        const table = buildLiveTable(snapshot.standings, snapshot.matches, m.competition);
-        return { ...m, narrative: templateNarrative(m, table) ?? undefined };
-      }),
-  );
+export async function getMatches({ competitions, date = new Date() }: MatchQuery): Promise<FeedResult<Match>> {
+  const { snapshot, source } = await resolveSnapshot(date);
+
+  const items = snapshot.matches
+    .filter((m) => competitions.includes(m.competition))
+    .filter((m) => isToday(m.kickoff, date))
+    .map((m) => withNarrative(m, snapshot.standings, snapshot.matches))
+    .sort((a, b) => a.kickoff.localeCompare(b.kickoff));
+
+  return { items, source, fetchedAt: new Date().toISOString(), builtAt: snapshot.builtAt };
 }
 
-export async function getMatches({
-  competitions,
-  legionnaires = BASE_LEGIONNAIRES,
-  followedTeams = [],
-  date = new Date(),
-  allowLive = true,
-}: MatchQuery): Promise<FeedResult<Match>> {
-  const { snapshot, source, error } = await resolve(
-    competitions, legionnaires, followedTeams, date, allowLive,
-  );
-
-  return {
-    items: visibleMatches(snapshot, competitions, date),
-    source,
-    fetchedAt: new Date().toISOString(),
-    builtAt: snapshot.builtAt,
-    error,
-  };
-}
-
-/** הטבלאות הגולמיות, לפני החלת משחקים חיים. */
+/** הטבלאות הגולמיות, כפי שהספק מחזיר אותן (לפני משחקי היום). */
 export async function getStandings(date = new Date()): Promise<FeedResult<Standing>> {
-  const snapshot = (await loadSnapshot()) ?? demoSnapshot(date);
-  return {
-    items: snapshot.standings,
-    source: snapshot.builtAt ? 'cache' : 'demo',
-    fetchedAt: new Date().toISOString(),
-    builtAt: snapshot.builtAt,
-  };
+  const { snapshot, source } = await resolveSnapshot(date);
+  return { items: snapshot.standings, source, fetchedAt: new Date().toISOString(), builtAt: snapshot.builtAt };
 }
 
 /**
- * הטבלה החיה יחד עם לוח המשחקים שבנה אותה — המסך צריך את שניהם, ואין
- * טעם לטעון את הקאש פעמיים.
+ * הטבלה של תחרות אחת, אחרי החלת משחקי היום, יחד עם לוח המשחקים
+ * שבנה אותה — המסך צריך את שניהם ואין טעם לטעון את הקאש פעמיים.
  */
-export async function getTableView(query: MatchQuery): Promise<
-  FeedResult<Standing> & { matches: Match[]; visible: Match[] }
-> {
-  const date = query.date ?? new Date();
-  const { snapshot, source, error } = await resolve(
-    query.competitions,
-    query.legionnaires ?? BASE_LEGIONNAIRES,
-    query.followedTeams ?? [],
-    date,
-    query.allowLive ?? true,
-  );
+export async function getTableView(
+  competitions: CompetitionId[],
+  date = new Date(),
+): Promise<FeedResult<Standing> & { matches: Match[] }> {
+  const { snapshot, source } = await resolveSnapshot(date);
   return {
-    items: snapshot.standings,
-    // `matches` הוא הסט המלא, כי חישוב הטבלה החיה צריך גם משחקים
-    // בתחרויות שלא מוצגות כרגע. `visible` הוא מה שמותר להציג.
+    items: snapshot.standings.filter((s) => competitions.includes(s.competition)),
     matches: snapshot.matches,
-    visible: visibleMatches(snapshot, query.competitions, date),
     source,
     fetchedAt: new Date().toISOString(),
     builtAt: snapshot.builtAt,
-    error,
   };
 }
 
 export interface LegionQuery {
   prefs?: LegionnairePrefs;
   date?: Date;
-  allowLive?: boolean;
 }
 
 /** רשימת הלגיונרים אחרי מיזוג שלוש השכבות. */
 export async function getLegionnaireList(prefs: LegionnairePrefs = NO_CUSTOM): Promise<Legionnaire[]> {
   const snapshot = await loadSnapshot();
-  return mergeLegionnaires(
-    BASE_LEGIONNAIRES,
-    snapshot?.legionnaires ?? [],
-    prefs.custom,
-    prefs.hiddenIds,
-  );
+  return mergeLegionnaires(BASE_LEGIONNAIRES, snapshot?.legionnaires ?? [], prefs.custom, prefs.hiddenIds);
 }
 
 export async function getLegionnaires({
   prefs = NO_CUSTOM,
   date = new Date(),
-  allowLive = true,
 }: LegionQuery = {}): Promise<FeedResult<LegionnaireDossier>> {
   const players = await getLegionnaireList(prefs);
-  const { snapshot, source, error } = await resolve(
-    [], players, [], date, allowLive,
-  );
+  const { snapshot, source } = await resolveSnapshot(date);
 
   const appearances: Record<string, LegionnaireAppearance[]> = snapshot.appearances ?? {};
 
   const items = sortDossiers(
     players.map((player) =>
-      buildDossier({
-        player,
-        history: appearances[player.id] ?? [],
-        matches: snapshot.matches,
-        now: date,
-      }),
+      buildDossier({ player, history: appearances[player.id] ?? [], matches: snapshot.matches, now: date }),
     ),
   );
 
-  return { items, source, fetchedAt: new Date().toISOString(), builtAt: snapshot.builtAt, error };
+  return { items, source, fetchedAt: new Date().toISOString(), builtAt: snapshot.builtAt };
 }
 
 export async function getTransfers(date = new Date()): Promise<FeedResult<TransferItem>> {
@@ -269,3 +157,133 @@ export async function getTransfers(date = new Date()): Promise<FeedResult<Transf
     builtAt: snapshot?.builtAt,
   };
 }
+
+export interface CirclePrefs {
+  legionnaires: LegionnairePrefs;
+  followedTeams: string[];
+  hiddenTeams: string[];
+}
+
+/**
+ * פיד הסקירה: סיכומים שנבנים מהנתונים (תוצאות, תנועת טבלה, העברות)
+ * וכותרות אמיתיות מ-RSS אם קיימות בקאש, ממוזגים וממוינים לפי זמן,
+ * מסוננים למעגל המעקב שלך.
+ */
+export async function getNews(circle: CirclePrefs, date = new Date()): Promise<FeedResult<NewsItem>> {
+  const legionnaires = await getLegionnaireList(circle.legionnaires);
+  const { snapshot, source } = await resolveSnapshot(date);
+
+  const items = buildNews({
+    matches: snapshot.matches,
+    standings: snapshot.standings,
+    transfers: snapshot.transfers ?? [],
+    headlines: snapshot.news ?? [],
+    legionnaires,
+    followedTeams: circle.followedTeams,
+    hiddenTeams: circle.hiddenTeams,
+    now: date,
+  });
+
+  return { items, source, fetchedAt: new Date().toISOString(), builtAt: snapshot.builtAt };
+}
+
+/**
+ * כרטיס "מה קורה" לכל קבוצה במעגל שלך: מיקום בטבלה, תוצאה אחרונה,
+ * המשחק הבא, ותרחיש להיום אם יש. קבוצה בלי טבלה זמינה (למשל שלב
+ * נוקאאוט) עדיין מקבלת כרטיס עם תוצאה ומשחק הבא בלבד.
+ */
+export async function getTeamStatuses(circle: CirclePrefs, date = new Date()): Promise<FeedResult<TeamStatus>> {
+  const legionnaires = await getLegionnaireList(circle.legionnaires);
+  const { snapshot, source } = await resolveSnapshot(date);
+
+  const roster = circleRoster(legionnaires, circle.followedTeams, circle.hiddenTeams);
+
+  const items: TeamStatus[] = roster.map((team) => buildTeamStatus(team, snapshot, legionnaires, date)).filter((t): t is TeamStatus => t !== null);
+
+  return { items, source, fetchedAt: new Date().toISOString(), builtAt: snapshot.builtAt };
+}
+
+function buildTeamStatus(
+  team: string,
+  snapshot: Snapshot,
+  legionnaires: Legionnaire[],
+  now: Date,
+): TeamStatus | null {
+  // מוצאים משחק כלשהו של הקבוצה כדי לדעת תחרות/צבע/מזהה — בלי זה אין לנו הקשר
+  const anyMatch = snapshot.matches.find((m) => playsInName(team, m));
+  const legionnaire = legionnaires.find((p) => p.club && clubNamesMatch(p.club, team));
+  const competition = anyMatch?.competition ?? legionnaire?.competition;
+  if (!competition) return null;
+
+  const side = anyMatch ? (playsInName(team, anyMatch) === 'home' ? anyMatch.home : anyMatch.away) : null;
+
+  const rows = buildTable(snapshot.standings, snapshot.matches, competition, now);
+  const row = rowForTeam(rows, team, side?.providerId);
+
+  const past = snapshot.matches
+    .filter((m) => m.status === 'finished' && playsInName(team, m))
+    .sort((a, b) => b.kickoff.localeCompare(a.kickoff))[0];
+
+  const upcoming = snapshot.matches
+    .filter((m) => m.status === 'scheduled' && playsInName(team, m) && new Date(m.kickoff) > now)
+    .sort((a, b) => a.kickoff.localeCompare(b.kickoff))[0];
+
+  const scenario = row
+    ? buildScenarios(rows, competition, 99).find((s) => s.teamId === row.teamId) ?? null
+    : null;
+
+  const dossier = legionnaire
+    ? buildDossier({
+        player: legionnaire,
+        history: snapshot.appearances?.[legionnaire.id] ?? [],
+        matches: snapshot.matches,
+        now,
+      })
+    : null;
+
+  return {
+    team,
+    short: side?.short ?? row?.short ?? team.slice(0, 3),
+    accent: side?.accent ?? row?.accent ?? '#666',
+    teamId: side?.providerId ?? row?.teamId,
+    competition,
+    table: row ? { ...row, gapText: gapSentence(rows, row.teamId) } : null,
+    lastResult: past
+      ? {
+          opponent: displayName(playsInName(team, past) === 'home' ? past.away.name : past.home.name),
+          scoreFor: (playsInName(team, past) === 'home' ? past.home.score : past.away.score) ?? 0,
+          scoreAgainst: (playsInName(team, past) === 'home' ? past.away.score : past.home.score) ?? 0,
+          date: past.kickoff,
+          home: playsInName(team, past) === 'home',
+          outcome: outcomeOf(past, team),
+          narrative: narrativeFor(past, rows),
+        }
+      : null,
+    nextMatch: upcoming
+      ? {
+          opponent: displayName(playsInName(team, upcoming) === 'home' ? upcoming.away.name : upcoming.home.name),
+          kickoff: upcoming.kickoff,
+          home: playsInName(team, upcoming) === 'home',
+        }
+      : null,
+    scenario,
+    legionnaire: dossier,
+  };
+}
+
+function playsInName(team: string, match: Match): 'home' | 'away' | null {
+  if (clubNamesMatch(team, match.home.name)) return 'home';
+  if (clubNamesMatch(team, match.away.name)) return 'away';
+  return null;
+}
+
+function outcomeOf(match: Match, team: string): 'win' | 'draw' | 'loss' {
+  const side = playsInName(team, match);
+  const forScore = (side === 'home' ? match.home.score : match.away.score) ?? 0;
+  const againstScore = (side === 'home' ? match.away.score : match.home.score) ?? 0;
+  if (forScore > againstScore) return 'win';
+  if (forScore < againstScore) return 'loss';
+  return 'draw';
+}
+
+export { playsIn };
